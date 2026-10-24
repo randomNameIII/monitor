@@ -1,0 +1,68 @@
+/* Shared by the display and the editor preview: tokens, the stage and panel chrome. */
+
+:root {
+  --ink: #070912;
+  --text: #e7eaf3;
+  --text-dim: #9aa3bd;
+  --text-faint: #5f6883;
+  --line: rgba(160, 175, 220, .12);
+  --line-strong: rgba(160, 175, 220, .26);
+  --surface: rgba(13, 17, 30, .64);
+  --ember: #ffb38a;
+  --accent: #9db4ff;
+  --font-display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+  --font-ui: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.stage {
+  position: absolute;
+  left: 0; top: 0;
+  transform-origin: 0 0;
+  font-family: var(--font-ui);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+.panel {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 30px 34px;
+  border-radius: 22px;
+}
+.panel[data-style="card"] {
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.panel[data-style="outline"] {
+  border: 1px solid var(--line-strong);
+}
+.panel[data-style="bare"] {
+  padding: 12px 16px;
+}
+
+.panel-body {
+  width: 100%;
+  height: 100%;
+  container-type: size;
+  overflow: hidden;
+}
+
+.panel-title {
+  margin: 0;
+  font-size: min(5.4cqh, 4.2cqw);
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: .01em;
+  flex: none;
+}
+
+.panel-msg {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: min(7cqh, 4.6cqw);
+  line-height: 1.4;
+  padding: 0 6%;
+}

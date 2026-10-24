@@ -1,0 +1,70 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ink);
+}
+body.hide-cursor, body.hide-cursor * { cursor: none !important; }
+
+#bg {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+
+/* Soft vignette keeps the eye on the panels; pure CSS, drawn once. */
+.vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(0, 0, 0, .55) 100%);
+}
+
+.dim {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 4s ease;
+}
+
+.status {
+  position: fixed;
+  right: 14px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 500 12px var(--font-ui);
+  color: var(--text-faint);
+  opacity: .55;
+}
+.status i {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text-faint);
+}
+.status[data-state="ok"] i { background: #6fcf97; }
+.status[data-state="stale"] i { background: var(--ember); }
+.status[data-state="error"] i { background: #f07178; }
+.status span { display: none; }
+.status[data-state="error"] span, .status[data-state="stale"] span, .status[data-state="idle"] span { display: inline; }
+
+.banner {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  padding: 12px 20px;
+  border-radius: 12px;
+  background: rgba(13, 17, 30, .9);
+  border: 1px solid var(--line-strong);
+  color: var(--text-dim);
+  font: 500 15px/1.4 var(--font-ui);
+  max-width: min(640px, 90vw);
+  text-align: center;
+}
+.banner a { color: var(--accent); }
+.banner[hidden] { display: none; }

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dusk</title>
+  <meta name="theme-color" content="#070912">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,200..600,0..100&family=Manrope:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="css/board.css">
+  <style>
+    html, body { margin: 0; min-height: 100%; background: var(--ink); color: var(--text); font: 16px/1.55 var(--font-ui); }
+    canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }
+    main { position: relative; max-width: 760px; margin: 0 auto; padding: 14vh 24px 60px; }
+    h1 { font-family: var(--font-display); font-weight: 300; font-size: clamp(64px, 12vw, 128px); line-height: .9; margin: 0;
+      font-variation-settings: "SOFT" 100, "opsz" 144; letter-spacing: -.03em; }
+    p.lead { color: var(--text-dim); font-size: 19px; max-width: 34em; margin: 22px 0 48px; }
+    .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .choice { display: block; text-decoration: none; color: var(--text); padding: 24px; border-radius: 18px;
+      background: var(--surface); border: 1px solid var(--line); }
+    .choice:hover, .choice:focus-visible { border-color: var(--accent); outline: none; }
+    .choice strong { display: block; font-size: 19px; margin-bottom: 6px; }
+    .choice span { color: var(--text-dim); font-size: 14.5px; }
+    footer { margin-top: 48px; color: var(--text-faint); font-size: 14px; }
+    footer a { color: var(--text-dim); }
+    @media (max-width: 600px) { .choices { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <canvas id="bg" aria-hidden="true"></canvas>
+  <main>
+    <h1>Dusk</h1>
+    <p class="lead">A quiet status board for your wall. Arrange panels from your main computer; a spare one on the wall shows them.</p>
+    <div class="choices">
+      <a class="choice" href="editor.html"><strong>Edit the board</strong><span>On your main computer. Place panels, add events, set up sync.</span></a>
+      <a class="choice" href="display.html"><strong>Show the board</strong><span>On the wall computer. Full screen, low power, nothing to click.</span></a>
+    </div>
+    <footer>Setup steps and kiosk tips are in the README.</footer>
+  </main>
+  <script type="module">
+    import { createBackground } from './js/core/background.js';
+    const bg = createBackground(document.getElementById('bg'));
+    bg.configure({ style: 'aurora', intensity: 0.5, fps: 15, hue: 230, speed: 1 });
+  </script>
+</body>
+</html>

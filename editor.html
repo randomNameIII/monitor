@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dusk editor</title>
+  <meta name="theme-color" content="#070912">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,200..600,0..100&family=Manrope:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="css/board.css">
+  <link rel="stylesheet" href="css/editor.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="index.html" aria-label="Dusk home">
+      <img src="assets/icon.svg" alt="" width="22" height="22"><span>Dusk</span>
+    </a>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="layout" aria-selected="true">Layout</button>
+      <button role="tab" data-tab="events">Events</button>
+      <button role="tab" data-tab="board">Board</button>
+      <button role="tab" data-tab="sync">Sync</button>
+    </nav>
+    <div class="top-actions">
+      <button class="icon-btn" id="undoBtn" title="Undo (Ctrl+Z)" aria-label="Undo">
+        <svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
+      </button>
+      <button class="icon-btn" id="redoBtn" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
+        <svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg>
+      </button>
+      <span class="pub-state" id="pubState" role="status"></span>
+      <button class="btn primary" id="publishBtn">Publish</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Layout -->
+    <section class="tab-panel layout" data-panel="layout">
+      <aside class="side palette">
+        <h2>Add a panel</h2>
+        <ul class="type-list" id="typeList"></ul>
+        <h2>On the board</h2>
+        <ul class="panel-list" id="panelList"></ul>
+      </aside>
+      <div class="canvas-wrap" id="canvasWrap">
+        <div class="viewport" id="viewport">
+          <canvas class="preview-bg" id="previewBg" aria-hidden="true"></canvas>
+          <div class="frame" id="frame">
+            <div class="stage" id="stage"></div>
+            <div class="overlay" id="overlay"></div>
+          </div>
+        </div>
+        <p class="hint">Drag panels to move them, drag the corner to resize. Arrow keys nudge the selected panel; hold Shift to resize.</p>
+      </div>
+      <aside class="side inspector" id="inspector"></aside>
+    </section>
+
+    <!-- Events -->
+    <section class="tab-panel page" data-panel="events" hidden>
+      <div class="page-inner">
+        <h1>Events</h1>
+        <p class="lead">Everything here feeds the Upcoming and Countdown panels. Repeating events (like a weekly class) only need to be entered once.</p>
+        <form class="event-form card" id="eventForm" autocomplete="off">
+          <label class="f-title">Title<input name="title" required placeholder="Chem lab report due"></label>
+          <label>Date<input name="date" type="date" required></label>
+          <label>Time<input name="time" type="time"><small>Leave empty for all day</small></label>
+          <label>Category<input name="category" list="categoryList" placeholder="school"></label>
+          <label>Repeats<select name="repeat">
+            <option value="none">Doesn’t repeat</option><option value="daily">Daily</option>
+            <option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option>
+          </select></label>
+          <label class="f-until">Until<input name="until" type="date"><small>Optional end date</small></label>
+          <div class="form-actions">
+            <button class="btn primary" type="submit" id="eventSubmit">Add event</button>
+            <button class="btn ghost" type="button" id="eventCancel" hidden>Cancel</button>
+          </div>
+          <datalist id="categoryList"></datalist>
+        </form>
+        <div class="events-toolbar">
+          <label class="check"><input type="checkbox" id="showPast"> Show past events</label>
+          <span class="spacer"></span>
+          <label class="btn ghost file-btn">Import .ics file<input type="file" id="icsInput" accept=".ics,text/calendar" hidden></label>
+          <button class="btn ghost" id="clearPast">Remove past events</button>
+        </div>
+        <div id="eventList" class="event-list"></div>
+      </div>
+    </section>
+
+    <!-- Board -->
+    <section class="tab-panel page" data-panel="board" hidden>
+      <div class="page-inner">
+        <h1>Board</h1>
+        <p class="lead">Settings that apply to the whole display.</p>
+        <div id="boardForm" class="board-form"></div>
+      </div>
+    </section>
+
+    <!-- Sync -->
+    <section class="tab-panel page" data-panel="sync" hidden>
+      <div class="page-inner" id="syncPage"></div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+  <script type="module" src="js/editor/main.js"></script>
+</body>
+</html>
