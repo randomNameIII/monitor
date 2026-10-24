@@ -15,7 +15,7 @@ It's a plain static site (HTML, CSS and JavaScript modules, no build step), so G
 |---|---|
 | Clock | Time and date, a thin bar for how much of the day has passed. Optional time zone, so you can add a second clock for somewhere else. |
 | Weather | Current conditions, high/low, feels-like, wind, rain chance and sunset, plus a 2–8 item daily or hourly forecast. Uses [Open-Meteo](https://open-meteo.com): free, no API key. |
-| Upcoming | Events from the Events tab grouped by day (Today, Tomorrow, Wednesday…). Items within 3 hours turn amber. Filter by category. |
+| Upcoming | Events from the Events tab. **List** layout groups everything coming up by day (Today, Tomorrow, Wednesday…). **Columns** layout shows today and the next 2–7 days side by side, each with its events; today's finished events stay dimmed, and a column that overflows says "+3 more". Items within 3 hours turn amber. Filter by category. |
 | Countdown | A big number of days (then hours, then minutes) until a date, or until the next event matching a category or title. |
 | Notes | A message or checklist you write from the editor. Supports `**bold**`, `_italic_`, `- bullets`, `[ ]` / `[x]` checkboxes and `# headings`. |
 
