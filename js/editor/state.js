@@ -30,26 +30,29 @@ const past = [];
 const future = [];
 let lastSnap = JSON.stringify(state.cfg);
 let lastSnapAt = 0;
-let lastReason = '';
+let lastGroup = null;
 
 // Start a fresh undo step on the next commit (e.g. at the start of a drag).
-export function breakUndoGroup() { lastSnapAt = 0; }
+export function breakUndoGroup() { lastSnapAt = 0; lastGroup = null; }
 
-function snapshot(reason) {
+// Continuous edits (typing in a field, dragging a panel) arrive as many commits; they merge into one
+// undo step when they share a group key and come within 1.5s of each other. Discrete actions never merge.
+const CONTINUOUS = new Set(['move', 'settings', 'board', 'style']);
+
+function snapshot(group) {
   const now = Date.now();
-  // Typing in a field or dragging produces many commits; group a burst of the same kind into one undo step.
-  if (reason !== lastReason || now - lastSnapAt > 1000) {
+  if (!group || group !== lastGroup || now - lastSnapAt > 1500) {
     past.push(lastSnap);
-    if (past.length > 80) past.shift();
+    if (past.length > 100) past.shift();
     future.length = 0;
   }
   lastSnapAt = now;
-  lastReason = reason;
+  lastGroup = group;
 }
 
-// Call after mutating state.cfg.
-export function commit(reason = 'edit') {
-  snapshot(reason);
+// Call after mutating state.cfg. opts.group: merge with the previous commit of the same group.
+export function commit(reason = 'edit', opts = {}) {
+  snapshot(opts.group ?? (CONTINUOUS.has(reason) ? reason : null));
   state.cfg.updatedAt = new Date().toISOString();
   lastSnap = JSON.stringify(state.cfg);
   saveLocal(state.cfg);
@@ -74,6 +77,7 @@ function restore(text) {
   state.cfg.updatedAt = new Date().toISOString();
   lastSnap = JSON.stringify(state.cfg);
   lastSnapAt = 0;
+  lastGroup = null;
   if (!state.cfg.panels.some((p) => p.id === state.selected)) state.selected = null;
   saveLocal(state.cfg);
   emit('history');

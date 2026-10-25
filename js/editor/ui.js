@@ -1,13 +1,22 @@
 // Small UI helpers shared by editor modules.
 
 let toastTimer;
-export function toast(message, isError = false) {
+// action: optional { label, fn } shown as a button, e.g. Undo.
+export function toast(message, isError = false, action = null) {
   const el = document.getElementById('toast');
   el.textContent = message;
+  if (action) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'toast-action';
+    b.textContent = action.label;
+    b.addEventListener('click', () => { el.hidden = true; action.fn(); });
+    el.append(b);
+  }
   el.classList.toggle('error', isError);
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, isError ? 6000 : 2600);
+  toastTimer = setTimeout(() => { el.hidden = true; }, isError ? 6000 : action ? 5000 : 2600);
 }
 
 export function relativeTime(iso) {

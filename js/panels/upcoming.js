@@ -1,7 +1,13 @@
 import { registerPanel } from '../core/registry.js';
 import { occurrences, dayLabel, formatTime, startOfDay, addDays } from '../core/util.js';
 
-// Stable soft color per category name, so "school" is always the same tint.
+// Project color wins; otherwise a stable soft color per category name, so "school" is always the same tint.
+function tint(ev, projects) {
+  const p = ev.projectId && (projects || []).find((x) => x.id === ev.projectId);
+  if (p && !ev.category) return { hue: p.hue, tag: p.title };
+  return { hue: categoryHue(ev.category), tag: ev.category || (p ? p.title : '') };
+}
+
 export function categoryHue(name) {
   let h = 0;
   for (const ch of String(name || '').toLowerCase()) h = (h * 31 + ch.charCodeAt(0)) % 360;
@@ -27,7 +33,7 @@ function mountColumns(ctx) {
     for (let i = 0; i < n; i++) {
       const day = addDays(today, i);
       const next = addDays(day, 1);
-      const items = all.filter((ev) => ev.at >= day && ev.at < next)
+      const items = all.filter((ev) => ev.at >= day && ev.at < next && !(ev.done && !s.showPast))
         // All-day items first, then by time.
         .sort((a, b) => (b.allDay - a.allDay) || (a.at - b.at));
       const label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : day.toLocaleDateString(undefined, { weekday: 'long' });
@@ -35,10 +41,10 @@ function mountColumns(ctx) {
       const weekend = day.getDay() === 0 || day.getDay() === 6;
 
       const list = items.map((ev) => {
-        const done = !ev.allDay && ev.at < now;
-        const soon = !ev.allDay && ev.at >= now && ev.at - now < 3 * 3600 * 1000;
-        const hue = categoryHue(ev.category);
-        const tag = s.showCategory && ev.category ? `<span class="upc-cat">${ctx.esc(ev.category)}</span>` : '';
+        const done = ev.done || (!ev.allDay && ev.at < now);
+        const soon = !done && !ev.allDay && ev.at >= now && ev.at - now < 3 * 3600 * 1000;
+        const { hue, tag: label } = tint(ev, ctx.data.projects);
+        const tag = s.showCategory && label ? `<span class="upc-cat">${ctx.esc(label)}</span>` : '';
         return `<li class="${done ? 'done' : ''}${soon ? ' soon' : ''}${ev.allDay ? ' allday' : ''}" style="--h:${hue}">
           <span class="upc-time">${ev.allDay ? 'All day' : formatTime(ev.at, s.hour24)}${tag}</span>
           <span class="upc-title">${ctx.esc(ev.title)}</span>
@@ -106,8 +112,9 @@ registerPanel({
     { key: 'max', label: 'Most items to show', type: 'number', default: 7, min: 1, max: 30, showIf: { layout: 'list' } },
     { key: 'columns', label: 'Number of days', type: 'number', default: 4, min: 2, max: 7, showIf: { layout: 'columns' },
       help: 'Starts with today. Wider panels fit more days.' },
-    { key: 'showPast', label: 'Keep today’s finished events, dimmed', type: 'toggle', default: true, showIf: { layout: 'columns' } },
+    { key: 'showPast', label: 'Keep finished and ticked-off items, dimmed', type: 'toggle', default: true, showIf: { layout: 'columns' } },
     { key: 'categories', label: 'Only these categories', type: 'text', default: '', placeholder: 'e.g. school, class (empty shows all)' },
+    { key: 'hideDone', label: 'Hide tasks you’ve ticked off', type: 'toggle', default: true, showIf: { layout: 'list' } },
     { key: 'showCategory', label: 'Show category tags', type: 'toggle', default: true },
     { key: 'hour24', label: '24-hour times', type: 'toggle', default: false },
   ],
@@ -119,7 +126,7 @@ registerPanel({
       const now = new Date();
       const list = occurrences(ctx.data.events, {
         from: now, days: s.days, categories: String(s.categories || '').split(','),
-      }).slice(0, s.max);
+      }).filter((ev) => !(ev.done && s.hideDone)).slice(0, s.max);
 
       if (!list.length) {
         ctx.el.innerHTML = `<div class="up">${title(ctx)}
@@ -136,11 +143,11 @@ registerPanel({
           lastDay = day;
         }
         const soon = !ev.allDay && ev.at - now < 3 * 3600 * 1000 && ev.at > now;
-        const hue = categoryHue(ev.category);
-        html += `<li class="${soon ? 'soon' : ''}">
+        const { hue, tag: label } = tint(ev, ctx.data.projects);
+        html += `<li class="${soon && !ev.done ? 'soon' : ''}${ev.done ? ' done' : ''}">
           <span class="up-time">${ev.allDay ? 'All day' : formatTime(ev.at, s.hour24)}</span>
           <span class="up-title">${ctx.esc(ev.title)}</span>
-          ${s.showCategory && ev.category ? `<span class="up-cat" style="--h:${hue}">${ctx.esc(ev.category)}</span>` : ''}
+          ${s.showCategory && label ? `<span class="up-cat" style="--h:${hue}">${ctx.esc(label)}</span>` : ''}
         </li>`;
       }
       html += '</ol>';
@@ -164,6 +171,8 @@ registerPanel({
       background: hsl(var(--h) 40% 50% / .14); }
     .up li.soon .up-time { color: var(--ember); }
     .up li.soon .up-title { color: #fff; }
+    .up li.done { opacity: .4; }
+    .up li.done .up-title { text-decoration: line-through; }
     .up-empty { color: var(--text-faint); font-size: min(5.4cqh, 3.9cqw); }
     @container (max-width: 380px) { .up li { grid-template-columns: 5.2em 1fr; } .up-cat { display: none; } }
 

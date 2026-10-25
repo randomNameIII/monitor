@@ -89,7 +89,7 @@ export function createBoard(stage, { editor = false } = {}) {
   function dependencyKey(p, def) {
     const b = cfg.board;
     return JSON.stringify([
-      p.type, p.settings, b.location, b.units, b.accent,
+      p.type, p.settings, b.location, b.units, b.accent, b.weekStart,
       def.usesData ? cfg.data : null,
     ]);
   }

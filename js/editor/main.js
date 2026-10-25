@@ -3,7 +3,7 @@
 import '../panels/index.js';
 import { state, prefs, publish, undo, redo, canUndo, canRedo, isDirty, onChange } from './state.js';
 import { initLayout } from './layout.js';
-import { initEvents } from './events.js';
+import { initPlan } from './plan/plan.js';
 import { initBoardTab } from './boardtab.js';
 import { initSyncTab } from './synctab.js';
 import { toast, relativeTime } from './ui.js';
@@ -14,6 +14,7 @@ const $ = (id) => document.getElementById(id);
 /* ---------- tabs ---------- */
 const tabs = [...document.querySelectorAll('.tabs [role="tab"]')];
 function showTab(name) {
+  if (name === 'events') name = 'plan'; // old links
   if (!tabs.some((t) => t.dataset.tab === name)) name = 'layout';
   for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset.tab === name));
   for (const p of document.querySelectorAll('.tab-panel')) p.hidden = p.dataset.panel !== name;
@@ -83,7 +84,7 @@ window.addEventListener('beforeunload', (e) => {
 /* ---------- start ---------- */
 saveLocal(state.cfg); // make sure a local display has something to show straight away
 initLayout();
-initEvents();
+initPlan();
 initBoardTab();
 initSyncTab();
 onChange(renderPubState);

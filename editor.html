@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,200..600,0..100&family=Manrope:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="css/board.css">
   <link rel="stylesheet" href="css/editor.css">
+  <link rel="stylesheet" href="css/plan.css">
 </head>
 <body>
   <header class="top">
@@ -19,7 +20,7 @@
     </a>
     <nav class="tabs" role="tablist">
       <button role="tab" data-tab="layout" aria-selected="true">Layout</button>
-      <button role="tab" data-tab="events">Events</button>
+      <button role="tab" data-tab="plan">Plan</button>
       <button role="tab" data-tab="board">Board</button>
       <button role="tab" data-tab="sync">Sync</button>
     </nav>
@@ -57,35 +58,49 @@
       <aside class="side inspector" id="inspector"></aside>
     </section>
 
-    <!-- Events -->
-    <section class="tab-panel page" data-panel="events" hidden>
-      <div class="page-inner">
-        <h1>Events</h1>
-        <p class="lead">Everything here feeds the Upcoming and Countdown panels. Repeating events (like a weekly class) only need to be entered once.</p>
-        <form class="event-form card" id="eventForm" autocomplete="off">
-          <label class="f-title">Title<input name="title" required placeholder="Chem lab report due"></label>
-          <label>Date<input name="date" type="date" required></label>
-          <label>Time<input name="time" type="time"><small>Leave empty for all day</small></label>
-          <label>Category<input name="category" list="categoryList" placeholder="school"></label>
-          <label>Repeats<select name="repeat">
-            <option value="none">Doesn’t repeat</option><option value="daily">Daily</option>
-            <option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option>
-          </select></label>
-          <label class="f-until">Until<input name="until" type="date"><small>Optional end date</small></label>
-          <div class="form-actions">
-            <button class="btn primary" type="submit" id="eventSubmit">Add event</button>
-            <button class="btn ghost" type="button" id="eventCancel" hidden>Cancel</button>
+    <!-- Plan -->
+    <section class="tab-panel plan" data-panel="plan" hidden>
+      <div class="plan-bar">
+        <div class="week-nav">
+          <button class="icon-btn" id="weekPrev" title="Previous week (←)" aria-label="Previous week"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+          <button class="icon-btn" id="weekNext" title="Next week (→)" aria-label="Next week"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
+          <div class="week-title">
+            <h1 id="weekLabel"></h1>
+            <span class="week-sub"><span id="weekRel"></span><span id="weekSummary"></span></span>
           </div>
-          <datalist id="categoryList"></datalist>
-        </form>
-        <div class="events-toolbar">
-          <label class="check"><input type="checkbox" id="showPast"> Show past events</label>
-          <span class="spacer"></span>
-          <label class="btn ghost file-btn">Import .ics file<input type="file" id="icsInput" accept=".ics,text/calendar" hidden></label>
-          <button class="btn ghost" id="clearPast">Remove past events</button>
+          <button class="btn ghost small" id="weekThis" title="Back to this week (T)">This week</button>
         </div>
-        <div id="eventList" class="event-list"></div>
+        <div class="view-toggle" role="group" aria-label="View">
+          <button type="button" data-view="week" aria-pressed="true">Week</button>
+          <button type="button" data-view="list" aria-pressed="false">List</button>
+        </div>
+        <div class="plan-keys" aria-hidden="true">
+          <span><kbd>N</kbd> add</span><span>Double-click a day</span><span>Right-click for options</span><span>Drag to move</span>
+        </div>
       </div>
+      <div class="plan-body">
+        <div class="plan-main plan-scroll" id="planMain">
+          <div class="plan-week" id="planWeek"></div>
+          <div class="plan-list" id="planList" hidden>
+            <div class="list-toolbar">
+              <input type="search" id="listSearch" placeholder="Search tasks, projects, categories" aria-label="Search">
+              <label class="check"><input type="checkbox" id="listDone"> Show done</label>
+              <label class="check"><input type="checkbox" id="listPast"> Show past</label>
+              <span class="spacer"></span>
+              <label class="btn ghost small file-btn" title="Calendar file from Canvas, Google Calendar or Outlook">Import .ics<input type="file" id="icsInput" accept=".ics,text/calendar" hidden></label>
+              <button class="btn ghost small" id="clearDone">Remove finished</button>
+            </div>
+            <table class="list-table">
+              <thead><tr><th class="c-tick"><span class="sr">Done</span></th><th>When</th><th>Title</th><th>Project</th><th>Category</th><th>Repeats</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <aside class="plan-side plan-scroll" id="planSide" aria-label="Goals, projects and inbox"></aside>
+      </div>
+      <button class="fab" id="planFab" title="Add a task, goal or project (N)" aria-label="Add">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
     </section>
 
     <!-- Board -->

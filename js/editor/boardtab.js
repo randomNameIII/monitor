@@ -21,9 +21,10 @@ function set(path, v) {
 }
 
 const SECTIONS = [
-  ['Location and units', [
+  ['Location, units and calendar', [
     { key: 'location', label: 'Location', type: 'location', help: 'Used by the weather panel.' },
     { key: 'units', label: 'Units', type: 'select', options: [{ value: 'imperial', label: 'Fahrenheit, mph' }, { value: 'metric', label: 'Celsius, km/h' }] },
+    { key: 'weekStart', label: 'Weeks start on', type: 'select', options: [{ value: 'monday', label: 'Monday' }, { value: 'sunday', label: 'Sunday' }], help: 'Used by the Plan tab and the Goals panel.' },
   ]],
   ['Look', [
     { key: 'accent', label: 'Accent color', type: 'color', swatches: ['#9db4ff', '#8fd3c7', '#c7a8ff', '#f2c48d', '#f29fb5', '#b8c4d6'] },

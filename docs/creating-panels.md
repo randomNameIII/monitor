@@ -88,13 +88,13 @@ Every field has `key`, `label`, `type` and `default`. Optional on all: `help` (s
 | `ctx.el` | The element to draw into. It is a CSS size container, so `cqw`, `cqh` and `cqmin` units scale with the panel. |
 | `ctx.settings` | This panel's settings, merged over the defaults. |
 | `ctx.board` | Board settings: `location`, `units` (`'imperial'`/`'metric'`), `accent`, and so on. |
-| `ctx.data` | Shared data from the editor. `ctx.data.events` is the events list. |
+| `ctx.data` | Shared data from the editor: `events` (tasks and events), `goals` and `projects`. The shapes are described at the top of `js/core/planning.js`, which also has helpers such as `goalsForWeek` and `projectProgress`. |
 | `ctx.every(ms, fn, { align, immediate })` | Runs `fn` now and every `ms`. `align: true` fires on clock boundaries (each new second or minute). Cleared automatically when the panel is removed or re-mounted. Errors thrown inside `fn` show in the panel instead of breaking the board. |
 | `ctx.fetchJSON(url, { maxAge })` | `fetch` + JSON with a cache in localStorage (`maxAge` in seconds, default 600). If the network is down it returns the last good response. The URL must allow cross-site requests (CORS). |
 | `ctx.esc(str)` | HTML-escape text before putting it in `innerHTML`. Always use this for user-entered text. |
 | `ctx.editor` | `true` when rendering inside the editor's preview. |
 
-Helpers in `js/core/util.js` you can import: `formatTime`, `dayLabel`, `occurrences` (expands repeating events into dated items), `parseLocal`, `daysBetween`, `miniMarkdown`, `inWindow`.
+Helpers in `js/core/util.js` you can import: `formatTime`, `dayLabel`, `occurrences` (expands repeating events into dated items, each with `done` for that day), `parseLocal`, `isoDate`, `weekStartOf`, `daysBetween`, `miniMarkdown`, `inWindow`.
 
 ## Keeping the display light
 

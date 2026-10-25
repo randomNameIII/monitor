@@ -25,6 +25,7 @@ export const DEFAULT_BOARD = {
   pollSeconds: 90,      // how often the display checks for a new config
   location: null,       // { name, lat, lon } shared by weather-aware panels
   units: 'imperial',    // imperial | metric
+  weekStart: 'monday',  // monday | sunday — used by the planner and the goals panel
 };
 
 export function defaultConfig() {
@@ -42,13 +43,33 @@ export function defaultConfig() {
       { id: uid(), type: 'countdown', x: 5, y: 4, w: 3, h: 4, settings: { match: 'break' } },
       { id: uid(), type: 'notes', x: 8, y: 4, w: 4, h: 4, settings: {} },
     ],
-    data: {
-      events: [
-        { id: uid(), title: 'Example: problem set due', date: plus(2), time: '23:59', category: 'school', repeat: 'none' },
-        { id: uid(), title: 'Example: weekly lab', date: plus(1), time: '14:00', category: 'class', repeat: 'weekly' },
-        { id: uid(), title: 'Example: winter break', date: plus(40), time: '', category: 'personal', repeat: 'none' },
-      ],
-    },
+    data: sampleData(today, plus),
+  };
+}
+
+function sampleData(today, plus) {
+  const project = uid();
+  const monday = new Date(today);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const wk = `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+  return {
+    events: [
+      { id: uid(), title: 'Example: problem set due', date: plus(2), time: '23:59', category: 'school', repeat: 'none' },
+      { id: uid(), title: 'Example: weekly lab', date: plus(1), time: '14:00', category: 'class', repeat: 'weekly' },
+      { id: uid(), title: 'Example: winter break', date: plus(40), time: '', category: 'personal', repeat: 'none' },
+      { id: uid(), title: 'Pick a topic', date: plus(-1), time: '', projectId: project, done: true, repeat: 'none' },
+      { id: uid(), title: 'Find five sources', date: plus(1), time: '', projectId: project, repeat: 'none' },
+      { id: uid(), title: 'Write outline', date: '', time: '', projectId: project, repeat: 'none' },
+      { id: uid(), title: 'First draft', date: '', time: '', projectId: project, repeat: 'none' },
+    ],
+    goals: [
+      { id: uid(), scope: 'week', date: wk, title: 'Go to the gym', target: 3, count: 1 },
+      { id: uid(), scope: 'week', date: wk, title: 'Call home', target: 1, count: 0 },
+      { id: uid(), scope: 'day', date: plus(0), title: 'Read 20 pages', target: 1, count: 0 },
+    ],
+    projects: [
+      { id: project, title: 'Example: research paper', hue: 220, due: plus(21), archived: false },
+    ],
   };
 }
 
@@ -64,12 +85,12 @@ export function normalize(cfg) {
     updatedAt: cfg.updatedAt || new Date().toISOString(),
     board: deepMerge(structuredClone(DEFAULT_BOARD), cfg.board || {}),
     panels: Array.isArray(cfg.panels) ? cfg.panels : [],
-    data: { events: [], ...(cfg.data || {}) },
+    data: { events: [], goals: [], projects: [], ...(cfg.data || {}) },
   };
   out.panels = out.panels
     .filter((p) => p && p.type)
     .map((p) => ({ id: p.id || uid(), x: 0, y: 0, w: 3, h: 2, settings: {}, ...p }));
-  if (!Array.isArray(out.data.events)) out.data.events = [];
+  for (const k of ['events', 'goals', 'projects']) if (!Array.isArray(out.data[k])) out.data[k] = [];
   return out;
 }
 

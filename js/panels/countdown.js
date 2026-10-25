@@ -29,7 +29,7 @@ registerPanel({
       }
       const match = String(s.match || '').toLowerCase();
       const ev = occurrences(ctx.data.events, { days: 400, categories: s.category ? [s.category] : [] })
-        .find((e) => !match || e.title.toLowerCase().includes(match));
+        .find((e) => !e.done && (!match || e.title.toLowerCase().includes(match)));
       return ev ? { at: ev.at, title: s.label || ev.title, allDay: ev.allDay } : null;
     };
 

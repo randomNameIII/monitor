@@ -16,6 +16,18 @@ export function formatTime(d, h24 = false, withSeconds = false) {
   return `${h}:${m}${s} ${ampm}`;
 }
 
+export function isoDate(d) {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// First day of the week containing d. weekStart is 'monday' or 'sunday'.
+export function weekStartOf(d, weekStart = 'monday') {
+  const x = startOfDay(d);
+  const first = weekStart === 'sunday' ? 0 : 1;
+  const back = (x.getDay() - first + 7) % 7;
+  return addDays(x, -back);
+}
+
 export function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
 export function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
 export function daysBetween(a, b) { return Math.round((startOfDay(b) - startOfDay(a)) / 86400000); }
@@ -53,16 +65,20 @@ export function occurrences(events, { from = new Date(), days = 30, categories =
     if (!first) continue;
     const until = ev.until ? addDays(parseLocal(ev.until), 1) : null;
     const allDay = !ev.time;
+    const repeat = ev.repeat || 'none';
     const ends = (d) => (allDay ? addDays(startOfDay(d), 1) : d);
 
     const push = (d) => {
       if (until && d >= until) return false;
       if (d >= windowEnd) return false;
-      if (ends(d) > from && d >= windowStart - 86400000) out.push({ ...ev, at: d, allDay });
+      if (ends(d) > from && d >= windowStart - 86400000) {
+        // Repeating tasks are ticked off per day (doneOn); one-off tasks use done.
+        const done = repeat === 'none' ? !!ev.done : (ev.doneOn || []).includes(isoDate(d));
+        out.push({ ...ev, at: d, allDay, done, day: isoDate(d) });
+      }
       return true;
     };
 
-    const repeat = ev.repeat || 'none';
     if (repeat === 'none') { push(first); continue; }
 
     let d = new Date(first);

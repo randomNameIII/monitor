@@ -6,3 +6,5 @@ import './weather.js';
 import './upcoming.js';
 import './countdown.js';
 import './notes.js';
+import './goals.js';
+import './projects.js';
