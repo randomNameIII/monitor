@@ -62,25 +62,25 @@
     <section class="tab-panel plan" data-panel="plan" hidden>
       <div class="plan-bar">
         <div class="week-nav">
-          <button class="icon-btn" id="weekPrev" title="Previous week (←)" aria-label="Previous week"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
-          <button class="icon-btn" id="weekNext" title="Next week (→)" aria-label="Next week"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
+          <button class="icon-btn" id="weekPrev" title="Back a week (Shift+←)" aria-label="Back a week"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+          <button class="icon-btn" id="weekNext" title="Forward a week (Shift+→)" aria-label="Forward a week"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
           <div class="week-title">
             <h1 id="weekLabel"></h1>
             <span class="week-sub"><span id="weekRel"></span><span id="weekSummary"></span></span>
           </div>
-          <button class="btn ghost small" id="weekThis" title="Back to this week (T)">This week</button>
+          <button class="btn ghost small" id="weekThis" title="Jump to today (T)">Today</button>
         </div>
         <div class="view-toggle" role="group" aria-label="View">
           <button type="button" data-view="week" aria-pressed="true">Week</button>
           <button type="button" data-view="list" aria-pressed="false">List</button>
         </div>
         <div class="plan-keys" aria-hidden="true">
-          <span><kbd>N</kbd> add</span><span>Double-click a day</span><span>Right-click for options</span><span>Drag to move</span>
+          <span><kbd>N</kbd> add</span><span>Double-click a day</span><span>Drag empty space to select</span><span>Right-click for options</span>
         </div>
       </div>
       <div class="plan-body">
         <div class="plan-main plan-scroll" id="planMain">
-          <div class="plan-week" id="planWeek"></div>
+          <div class="timeline" id="planWeek"></div>
           <div class="plan-list" id="planList" hidden>
             <div class="list-toolbar">
               <input type="search" id="listSearch" placeholder="Search tasks, projects, categories" aria-label="Search">
@@ -97,6 +97,14 @@
           </div>
         </div>
         <aside class="plan-side plan-scroll" id="planSide" aria-label="Goals, projects and inbox"></aside>
+      </div>
+      <div class="sel-bar" id="selBar" data-act="sel-bar" hidden role="toolbar" aria-label="Selection">
+        <span class="sel-count" id="selCount"></span>
+        <button type="button" class="btn small" data-act="sel-done">Done</button>
+        <button type="button" class="btn small" data-act="sel-menu">Move, project…</button>
+        <button type="button" class="btn danger small" data-act="sel-delete">Delete</button>
+        <span class="sel-hint">Drag any of them to move them all</span>
+        <button type="button" class="icon-btn" data-act="sel-clear" title="Clear selection (Esc)" aria-label="Clear selection"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
       </div>
       <button class="fab" id="planFab" title="Add a task, goal or project (N)" aria-label="Add">
         <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>

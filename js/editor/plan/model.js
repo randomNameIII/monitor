@@ -11,7 +11,15 @@ export const findTask = (id) => data().events.find((e) => e.id === id);
 export const findGoal = (id) => data().goals.find((g) => g.id === id);
 export const findProject = (id) => data().projects.find((p) => p.id === id);
 
-const save = (opts) => commit('events', opts);
+let batching = 0;
+const save = (opts) => { if (!batching) commit('events', opts); };
+
+// Run several changes as one undo step (used for actions on a multi-selection).
+export function batch(fn) {
+  batching++;
+  try { fn(); } finally { batching--; }
+  if (!batching) commit('events');
+}
 const nextOrder = (list) => (list.length ? Math.max(...list.map((x) => x.order ?? 0)) + 1 : 0);
 
 /* ---------------- tasks ---------------- */

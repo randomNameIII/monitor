@@ -1,14 +1,15 @@
-// Plan tab: a week board of tasks and daily goals, with weekly goals, projects and an inbox beside it.
-// Everything is direct manipulation: drag to move, right-click for options, click to edit in place,
-// double-click a day (or press N) to add.
+// Plan tab: a continuous, horizontally scrolling strip of days, with weekly goals, projects and an
+// inbox beside it. Everything is direct manipulation: drag to move, drag across empty space to select
+// several things, right-click for options, click to edit in place, double-click a day (or press N) to add.
 
 import { state, onChange, undo, commit } from '../state.js';
-import { esc, isoDate, addDays, parseLocal, weekStartOf, formatTime, dayLabel, occurrences, startOfDay } from '../../core/util.js';
+import { esc, isoDate, addDays, parseLocal, weekStartOf, formatTime, dayLabel, occurrences, startOfDay, daysBetween } from '../../core/util.js';
 import { goalsForDay, goalsForWeek, isGoalDone, projectProgress, nextProjectTask, byOrder, categoryHue, daysUntil } from '../../core/planning.js';
 import { uid } from '../../core/config.js';
 import * as M from './model.js';
 import { parseQuick } from './parse.js';
 import { enableDrag } from './drag.js';
+import { enableMarquee, paintSelection, clearSelection, toggleSelected, isSelected, selectedItems, selectionSize, setSelection, keyOf, onSelectionChange } from './select.js';
 import { openMenu, closeMenu } from './menu.js';
 import { closePopover } from './popover.js';
 import { editTask, editGoal, editProject, deleteWithUndo } from './editors.js';
@@ -18,13 +19,22 @@ import { toast } from '../ui.js';
 
 const $ = (id) => document.getElementById(id);
 const root = document.querySelector('[data-panel="plan"]');
-const weekEl = $('planWeek');
+const weekEl = $('planWeek'); // the timeline
 const listEl = $('planList');
 const sideEl = $('planSide');
 const scrollEl = $('planMain');
 
 const ws = () => state.cfg.board.weekStart || 'monday';
-let viewStart = weekStartOf(new Date(), ws());
+
+// The timeline renders whole weeks from rangeStart and grows in either direction as you scroll.
+let rangeStart = addDays(weekStartOf(new Date(), ws()), -14);
+let rangeWeeks = 10;
+let colW = 200;
+// The week the sidebar's goals belong to: the week of today when today is on screen, otherwise the
+// week in the middle of the screen.
+let focusWeek = weekStartOf(new Date(), ws());
+let firstVisible = '';
+let positioned = false;
 let view = 'week';
 let inline = null;          // { zone, value } — which inline add box is open
 let flash = null;           // id of an item to highlight after it's added
@@ -61,13 +71,13 @@ function taskCard(t, { day = '', compact = false, showDate = false } = {}) {
   if (t.category) meta.push(`<span class="m-cat">#${esc(t.category)}</span>`);
   if (proj && !compact) meta.push(`<span class="m-proj">${esc(proj.title)}</span>`);
   if (t.notes) meta.push('<span title="Has notes">¶</span>');
-  return `<li class="card${done ? ' done' : ''}${overdue ? ' overdue' : ''}${flash === t.id ? ' flash' : ''}" tabindex="0"
+  return `<li class="task${done ? ' done' : ''}${overdue ? ' overdue' : ''}${flash === t.id ? ' flash' : ''}" tabindex="0"
       data-drag="task" data-id="${t.id}" data-day="${day}" data-ordered="${t.time ? 'false' : 'true'}"
       ${hue != null ? `style="--h:${hue}"` : ''}>
       <button type="button" class="tick${done ? ' on' : ''}" data-act="tick" aria-label="${done ? 'Mark not done' : 'Mark done'}"></button>
-      <div class="card-main">
-        <span class="card-title">${esc(t.title)}</span>
-        ${meta.length ? `<span class="card-meta">${meta.join('')}</span>` : ''}
+      <div class="task-main">
+        <span class="task-title">${esc(t.title)}</span>
+        ${meta.length ? `<span class="task-meta">${meta.join('')}</span>` : ''}
       </div>
     </li>`;
 }
@@ -108,18 +118,48 @@ function sortDay(items) {
   });
 }
 
-function renderWeek() {
+const rangeDays = () => rangeWeeks * 7;
+const indexOf = (key) => daysBetween(rangeStart, parseLocal(key));
+const keyAt = (i) => isoDate(addDays(rangeStart, i));
+
+function weekName(start) {
+  const diff = Math.round(daysBetween(weekStartOf(new Date(), ws()), start) / 7);
+  if (diff === 0) return 'This week';
+  if (diff === 1) return 'Next week';
+  if (diff === -1) return 'Last week';
+  return `Week of ${start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+}
+
+function renderTimeline() {
   const today = todayKey();
-  const occ = occurrences(ev(), { from: viewStart, days: 7 });
-  let html = '';
-  for (let i = 0; i < 7; i++) {
-    const d = addDays(viewStart, i);
+  const n = rangeDays();
+  const occ = occurrences(ev(), { from: rangeStart, days: n });
+  const byDay = new Map();
+  for (const o of occ) (byDay.get(o.day) || byDay.set(o.day, []).get(o.day)).push(o);
+  const thisWeek = isoDate(weekStartOf(new Date(), ws()));
+
+  let bands = '';
+  for (let w = 0; w < rangeWeeks; w++) {
+    const start = addDays(rangeStart, w * 7);
+    const key = isoDate(start);
+    const goals = goalsForWeek(state.cfg.data.goals, start);
+    const done = goals.filter(isGoalDone).length;
+    const end = addDays(start, 6);
+    const range = `${start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${end.toLocaleDateString(undefined, start.getMonth() === end.getMonth() ? { day: 'numeric' } : { month: 'short', day: 'numeric' })}`;
+    bands += `<div class="wband${key === thisWeek ? ' this' : ''}${key === isoDate(focusWeek) ? ' focus' : ''}" style="grid-column:${w * 7 + 1} / span 7" data-week="${key}" data-act="week-band">
+      <span class="wband-label"><b>${weekName(start)}</b><span>${range}</span>${goals.length ? `<span class="wband-goals${done === goals.length ? ' all' : ''}">${done}/${goals.length} goals</span>` : ''}</span>
+    </div>`;
+  }
+
+  let days = '';
+  for (let i = 0; i < n; i++) {
+    const d = addDays(rangeStart, i);
     const key = isoDate(d);
-    const items = sortDay(occ.filter((o) => o.day === key));
+    const items = sortDay(byDay.get(key) || []);
     const goals = goalsForDay(state.cfg.data.goals, key);
     const gDone = goals.filter(isGoalDone).length;
     const showMonth = i === 0 || d.getDate() === 1;
-    html += `<section class="day${key === today ? ' today' : ''}${key < today ? ' past' : ''}" data-drop data-accept="task day-goal week-goal" data-zone="day" data-day="${key}">
+    days += `<section class="day${key === today ? ' today' : ''}${key < today ? ' past' : ''}${i % 7 === 0 ? ' wstart' : ''}" style="grid-column:${i + 1}" data-drop data-accept="task day-goal week-goal" data-zone="day" data-day="${key}">
       <header class="day-head" data-act="day-menu">
         <span class="dow">${d.toLocaleDateString(undefined, { weekday: 'short' })}</span>
         <span class="dnum">${d.getDate()}</span>
@@ -129,42 +169,152 @@ function renderWeek() {
         <button type="button" class="dg-add" data-act="inline" data-target="dgoal:${key}" title="Add a goal for this day">+ goal</button>
       </header>
       ${goals.length || inline?.zone === `dgoal:${key}` ? `<ul class="goal-list day-goals">${goals.map((g) => goalItem(g, 'day-goal')).join('')}</ul>${inlineBox(`dgoal:${key}`, 'Goal for the day')}` : ''}
-      <ol class="cards">${items.map((t) => taskCard(t, { day: key })).join('')}</ol>
+      <ol class="tasks">${items.map((t) => taskCard(t, { day: key })).join('')}</ol>
       ${inlineBox(`day:${key}`, 'New task, e.g. Essay 3pm #school')}
       ${addButton(`day:${key}`, 'Add')}
     </section>`;
   }
-  weekEl.innerHTML = html;
+  weekEl.style.setProperty('--colw', `${colW}px`);
+  weekEl.style.setProperty('--days', n);
+  weekEl.innerHTML = bands + days;
+}
+
+/* ----------------------------- scrolling ----------------------------- */
+
+function visibleRange() {
+  const first = Math.max(0, Math.floor((scrollEl.scrollLeft + 2) / colW));
+  const last = Math.min(rangeDays() - 1, Math.floor((scrollEl.scrollLeft + scrollEl.clientWidth - 2) / colW));
+  return { first, last };
+}
+
+function computeFocus() {
+  const { first, last } = visibleRange();
+  const t = indexOf(todayKey());
+  const anchor = t >= first && t <= last ? t : Math.floor((first + last) / 2);
+  return weekStartOf(addDays(rangeStart, anchor), ws());
+}
+
+// Grow the rendered range so `key` has at least a week of room on both sides.
+function ensureRange(key) {
+  const i = indexOf(key);
+  let grew = false;
+  if (i < 7) {
+    const weeks = Math.ceil((7 - i) / 7) + 3;
+    rangeStart = addDays(rangeStart, -weeks * 7);
+    rangeWeeks += weeks;
+    renderTimeline();
+    scrollEl.scrollLeft += weeks * 7 * colW;
+    grew = true;
+  }
+  if (indexOf(key) > rangeDays() - 8) {
+    rangeWeeks += Math.ceil((indexOf(key) - rangeDays() + 8) / 7) + 3;
+    renderTimeline();
+    grew = true;
+  }
+  if (grew) paintSelection(root);
+  return grew;
+}
+
+// Put `key` at the left edge, with `before` days of context to its left.
+function scrollToDay(key, { smooth = false, before = 1 } = {}) {
+  ensureRange(isoDate(addDays(parseLocal(key), -before - 7)));
+  ensureRange(isoDate(addDays(parseLocal(key), 14)));
+  const left = Math.max(0, (indexOf(key) - before) * colW);
+  // Long trips jump; short ones glide.
+  const far = Math.abs(left - scrollEl.scrollLeft) > scrollEl.clientWidth * 2;
+  scrollEl.scrollTo({ left, behavior: smooth && !far ? 'smooth' : 'auto' });
+}
+
+function isDayVisible(key) {
+  const { first, last } = visibleRange();
+  const i = indexOf(key);
+  return i >= first && i <= last;
+}
+
+function revealDay(key) {
+  if (!isDayVisible(key)) scrollToDay(key, { smooth: true });
+}
+
+function goDays(delta) {
+  closePopover();
+  const { first } = visibleRange();
+  const target = keyAt(first + delta);
+  ensureRange(isoDate(addDays(parseLocal(target), -7)));
+  ensureRange(isoDate(addDays(parseLocal(target), 21)));
+  scrollEl.scrollTo({ left: indexOf(target) * colW, behavior: 'smooth' });
+}
+
+function goToday() {
+  closePopover();
+  scrollToDay(todayKey(), { smooth: positioned });
+}
+
+let scrollQueued = false;
+function onScroll() {
+  if (view !== 'week' || scrollQueued) return;
+  scrollQueued = true;
+  requestAnimationFrame(() => {
+    scrollQueued = false;
+    const { first, last } = visibleRange();
+    // Load more weeks before the edge comes into view.
+    if (first < 7) ensureRange(keyAt(first));
+    else if (last > rangeDays() - 8) ensureRange(keyAt(last));
+    const f = computeFocus();
+    const firstKey = keyAt(visibleRange().first);
+    if (isoDate(f) !== isoDate(focusWeek) || firstKey !== firstVisible) {
+      const weekChanged = isoDate(f) !== isoDate(focusWeek);
+      focusWeek = f;
+      firstVisible = firstKey;
+      if (weekChanged) weekEl.querySelectorAll('.wband').forEach((b) => b.classList.toggle('focus', b.dataset.week === isoDate(focusWeek)));
+      render({ timeline: false });
+    } else {
+      renderBar();
+    }
+  });
+}
+
+// Columns fill the screen 7 at a time on wide screens, and never get narrower than 168px.
+function sizeColumns() {
+  const w = scrollEl.clientWidth;
+  if (!w) return;
+  const next = Math.max(168, Math.floor(w / 7));
+  if (next === colW && positioned) return;
+  const anchor = positioned ? visibleRange().first : null;
+  colW = next;
+  weekEl.style.setProperty('--colw', `${colW}px`);
+  if (!positioned) { positioned = true; scrollToDay(todayKey()); }
+  else if (anchor != null) scrollEl.scrollLeft = anchor * colW;
 }
 
 function renderSide() {
   const d = state.cfg.data;
   const today = todayKey();
-  const start = isoDate(viewStart);
+  const start = isoDate(focusWeek);
+  const leftEdge = firstVisible || today;
   let html = '';
 
-  // Overdue: unfinished one-off tasks from before this week (or before today, when viewing a future week).
-  const overdue = ev().filter((t) => t.date && (!t.repeat || t.repeat === 'none') && !t.done && t.date < today && t.date < start)
+  // Overdue: unfinished one-off tasks from before today that are off the left of the screen.
+  const overdue = ev().filter((t) => t.date && (!t.repeat || t.repeat === 'none') && !t.done && t.date < today && t.date < leftEdge)
     .sort((a, b) => a.date.localeCompare(b.date));
   if (overdue.length) {
     html += `<section class="side-block overdue-block">
       <header><h2>Overdue</h2><span class="count">${overdue.length}</span></header>
       <p class="side-hint">Drag onto a day to reschedule.</p>
-      <ol class="cards compact">${overdue.map((t) => taskCard(t, { day: t.date, showDate: true })).join('')}</ol>
+      <ol class="tasks compact">${overdue.map((t) => taskCard(t, { day: t.date, showDate: true })).join('')}</ol>
     </section>`;
   }
 
   // Week goals
-  const goals = goalsForWeek(d.goals, viewStart);
+  const goals = goalsForWeek(d.goals, focusWeek);
   const done = goals.filter(isGoalDone).length;
-  const prevGoals = goalsForWeek(d.goals, addDays(viewStart, -7)).filter((g) => !isGoalDone(g) && g.carriedTo !== start);
+  const prevGoals = goalsForWeek(d.goals, addDays(focusWeek, -7)).filter((g) => !isGoalDone(g) && g.carriedTo !== start);
   html += `<section class="side-block" data-drop data-accept="week-goal day-goal" data-zone="week">
-    <header><h2>Week goals</h2>${goals.length ? `<span class="count">${done} of ${goals.length}</span>` : ''}
+    <header><h2>Goals</h2><span class="week-pill" title="Follows the week you’re looking at">${weekName(focusWeek)}</span>${goals.length ? `<span class="count">${done} of ${goals.length}</span>` : ''}
       <button type="button" class="icon-add" data-act="inline" data-target="week" aria-label="Add a week goal">+</button></header>
     ${goals.length ? `<div class="week-bar"><i style="width:${(done / goals.length) * 100}%"></i></div>` : ''}
     <ul class="goal-list">${goals.map((g) => goalItem(g, 'week-goal')).join('')}</ul>
     ${inlineBox('week', 'Goal for the week, e.g. Gym 3x')}
-    ${!goals.length && inline?.zone !== 'week' ? '<p class="side-hint">What do you want to get done this week? Add “3x” for things you’ll do several times.</p>' : ''}
+    ${!goals.length && inline?.zone !== 'week' ? `<p class="side-hint">What do you want to get done ${weekName(focusWeek) === 'This week' ? 'this week' : 'that week'}? Add “3x” for things you’ll do several times.</p>` : ''}
     ${prevGoals.length ? `<button type="button" class="carry" data-act="carry">Bring ${prevGoals.length} unfinished goal${prevGoals.length === 1 ? '' : 's'} from last week</button>` : ''}
   </section>`;
 
@@ -181,7 +331,7 @@ function renderSide() {
   const inbox = ev().filter((t) => !t.date && !t.projectId).sort(byOrder);
   html += `<section class="side-block inbox" data-drop data-accept="task" data-zone="inbox">
     <header><h2>Inbox</h2>${inbox.length ? `<span class="count">${inbox.length}</span>` : ''}</header>
-    <ol class="cards compact">${inbox.map((t) => taskCard(t)).join('')}</ol>
+    <ol class="tasks compact">${inbox.map((t) => taskCard(t)).join('')}</ol>
     ${inlineBox('inbox', 'Something to do, no date yet')}
     ${addButton('inbox', 'Add')}
     ${!inbox.length && inline?.zone !== 'inbox' ? '<p class="side-hint">Tasks without a date land here. Drag them onto a day when you know when.</p>' : ''}
@@ -203,8 +353,8 @@ function projectCard(p) {
     const unscheduled = tasks.filter((t) => !t.date && !t.done).sort(byOrder);
     const scheduled = tasks.filter((t) => t.date && !t.done).sort((a, b) => a.date.localeCompare(b.date) || (a.time || '').localeCompare(b.time || ''));
     const doneTasks = tasks.filter((t) => t.done);
-    body = `<ol class="cards compact">${[...unscheduled.map((t) => taskCard(t, { compact: true })), ...scheduled.map((t) => taskCard(t, { compact: true, showDate: true, day: t.date }))].join('')}</ol>
-      ${doneTasks.length ? `<details class="done-tasks"><summary>${doneTasks.length} done</summary><ol class="cards compact">${doneTasks.map((t) => taskCard(t, { compact: true, showDate: !!t.date })).join('')}</ol></details>` : ''}
+    body = `<ol class="tasks compact">${[...unscheduled.map((t) => taskCard(t, { compact: true })), ...scheduled.map((t) => taskCard(t, { compact: true, showDate: true, day: t.date }))].join('')}</ol>
+      ${doneTasks.length ? `<details class="done-tasks"><summary>${doneTasks.length} done</summary><ol class="tasks compact">${doneTasks.map((t) => taskCard(t, { compact: true, showDate: !!t.date })).join('')}</ol></details>` : ''}
       ${inlineBox(`project:${p.id}`, 'Task for this project')}
       ${addButton(`project:${p.id}`, 'Add task')}`;
   }
@@ -223,29 +373,24 @@ function projectCard(p) {
 }
 
 function renderBar() {
-  const end = addDays(viewStart, 6);
-  const sameMonth = viewStart.getMonth() === end.getMonth();
   const fmt = (d, opts) => d.toLocaleDateString(undefined, opts);
-  $('weekLabel').textContent = `${fmt(viewStart, { month: 'short', day: 'numeric' })} – ${sameMonth ? end.getDate() : fmt(end, { month: 'short', day: 'numeric' })}`;
-  const isThis = isoDate(viewStart) === isoDate(weekStartOf(new Date(), ws()));
-  $('weekThis').hidden = isThis;
-  $('weekRel').textContent = isThis ? 'This week' : daysUntilWeek();
-
-  const occ = occurrences(ev(), { from: viewStart, days: 7 });
-  const tDone = occ.filter((o) => o.done).length;
-  const goals = goalsForWeek(state.cfg.data.goals, viewStart);
-  const parts = [];
-  if (occ.length) parts.push(`${tDone} of ${occ.length} tasks`);
-  if (goals.length) parts.push(`${goals.filter(isGoalDone).length} of ${goals.length} goals`);
-  $('weekSummary').textContent = parts.join(' · ');
   root.querySelectorAll('.view-toggle button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
-}
-
-function daysUntilWeek() {
-  const diff = Math.round((viewStart - weekStartOf(new Date(), ws())) / (7 * 86400000));
-  if (diff === 1) return 'Next week';
-  if (diff === -1) return 'Last week';
-  return diff > 0 ? `In ${diff} weeks` : `${-diff} weeks ago`;
+  if (view !== 'week' || !positioned) { $('weekLabel').textContent = view === 'list' ? 'Everything' : ''; $('weekRel').textContent = ''; $('weekSummary').textContent = ''; return; }
+  const { first, last } = visibleRange();
+  const a = addDays(rangeStart, first), z = addDays(rangeStart, last);
+  $('weekLabel').textContent = `${fmt(a, { month: 'short', day: 'numeric' })} – ${a.getMonth() === z.getMonth() ? z.getDate() : fmt(z, { month: 'short', day: 'numeric' })}`;
+  const t = indexOf(todayKey());
+  const todayOn = t >= first && t <= last;
+  $('weekThis').hidden = todayOn;
+  if (todayOn) $('weekRel').textContent = 'Today is on screen';
+  else {
+    const off = t < first ? first - t : last - t;
+    const n = Math.abs(off);
+    const unit = n >= 14 ? `${Math.round(n / 7)} weeks` : `${n} day${n === 1 ? '' : 's'}`;
+    $('weekRel').textContent = off > 0 ? `${unit} ahead` : `${unit} back`;
+  }
+  const occ = occurrences(ev(), { from: a, days: last - first + 1 });
+  $('weekSummary').textContent = occ.length ? `${occ.filter((o) => o.done).length} of ${occ.length} tasks done` : '';
 }
 
 /* ----------------------------- list view ----------------------------- */
@@ -285,52 +430,172 @@ function renderList() {
 
 /* ----------------------------- render all ----------------------------- */
 
-export function render() {
+export function render({ timeline = true } = {}) {
   if (!root) return;
   const focusId = root.contains(document.activeElement) ? document.activeElement.closest('[data-id]')?.dataset.id : null;
+  const focusDay = root.contains(document.activeElement) ? document.activeElement.closest('[data-id]')?.dataset.day : null;
   const inlineFocused = document.activeElement?.dataset?.inline;
-  const scroll = [scrollEl.scrollTop, sideEl.scrollTop];
+  const scroll = [scrollEl.scrollTop, scrollEl.scrollLeft, sideEl.scrollTop];
 
-  renderBar();
   weekEl.hidden = view !== 'week';
   listEl.hidden = view !== 'list';
-  if (view === 'week') renderWeek(); else renderList();
+  if (timeline) { if (view === 'week') renderTimeline(); else renderList(); }
   renderSide();
+  renderBar();
 
-  scrollEl.scrollTop = scroll[0];
-  sideEl.scrollTop = scroll[1];
+  // Only touch scroll positions that changed: setting them cancels a smooth scroll in progress.
+  if (scrollEl.scrollTop !== scroll[0]) scrollEl.scrollTop = scroll[0];
+  if (scrollEl.scrollLeft !== scroll[1]) scrollEl.scrollLeft = scroll[1];
+  if (sideEl.scrollTop !== scroll[2]) sideEl.scrollTop = scroll[2];
+  paintSelection(root);
+  renderSelectionBar();
   if (inlineFocused || (inline && inline.focus)) {
     const input = root.querySelector(`[data-inline="${inline?.zone}"]`);
-    if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+    if (input) { input.focus({ preventScroll: true }); input.setSelectionRange(input.value.length, input.value.length); }
     if (inline) inline.focus = false;
   } else if (focusId) {
-    root.querySelector(`[data-id="${focusId}"]`)?.focus({ preventScroll: true });
+    const els = [...root.querySelectorAll(`[data-id="${focusId}"]`)];
+    (els.find((x) => (x.dataset.day || null) === (focusDay || null)) || els[0])?.focus({ preventScroll: true });
   }
   if (flash) {
     const id = flash;
     flash = null;
     const el = root.querySelector(`[data-id="${id}"]`);
-    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    el?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
   }
+}
+
+/* ----------------------------- selection ----------------------------- */
+
+function renderSelectionBar() {
+  const bar = $('selBar');
+  const n = selectionSize();
+  bar.hidden = n < 2;
+  document.body.classList.toggle('has-selbar', n >= 2 && visible());
+  if (n >= 2) $('selCount').textContent = `${n} selected`;
+}
+
+const selTasks = () => selectedItems().filter((x) => x.kind === 'task' && M.findTask(x.id));
+const selGoals = () => selectedItems().filter((x) => x.kind === 'goal' && M.findGoal(x.id));
+
+function bulkDone() {
+  const tasks = selTasks(), goals = selGoals();
+  const anyOpen = tasks.some((x) => !M.isTaskDoneOn(M.findTask(x.id), x.day || M.findTask(x.id).date)) || goals.some((x) => !isGoalDone(M.findGoal(x.id)));
+  M.batch(() => {
+    for (const x of tasks) { const t = M.findTask(x.id); if (M.isTaskDoneOn(t, x.day || t.date) !== anyOpen) M.toggleTask(x.id, x.day || t.date); }
+    for (const x of goals) { const g = M.findGoal(x.id); M.updateGoal(x.id, { count: anyOpen ? g.target || 1 : 0 }); }
+  });
+  toast(anyOpen ? `Marked ${tasks.length + goals.length} done` : `Marked ${tasks.length + goals.length} not done`, false, { label: 'Undo', fn: undo });
+}
+
+// Shift everything by `delta` days. A repeating series moves once even if several of its days are selected.
+function bulkShift(delta) {
+  const seen = new Set();
+  const newKeys = [];
+  M.batch(() => {
+    for (const x of selTasks()) {
+      const t = M.findTask(x.id);
+      const day = x.day || t.date;
+      if (!day || seen.has(x.id)) { newKeys.push(`t:${x.id}:${x.day}`); continue; }
+      seen.add(x.id);
+      const to = isoDate(addDays(parseLocal(day), delta));
+      M.moveTask(x.id, to, { fromDay: day });
+      newKeys.push(`t:${x.id}:${x.day ? to : ''}`);
+    }
+    for (const x of selGoals()) {
+      const g = M.findGoal(x.id);
+      if (g.scope === 'day') M.moveGoal(x.id, { date: isoDate(addDays(parseLocal(g.date), delta)) });
+      newKeys.push(`g:${x.id}`);
+    }
+  });
+  setSelection(newKeys);
+}
+
+// Move everything onto one day (undated tasks get that date).
+function bulkMoveTo(dayKey, { anchorDay = null } = {}) {
+  // Dropping a multi-selection keeps the gaps between days: shift by how far the grabbed item moved.
+  if (anchorDay) return bulkShift(daysBetween(parseLocal(anchorDay), parseLocal(dayKey)));
+  const seen = new Set();
+  const newKeys = [];
+  M.batch(() => {
+    for (const x of selTasks()) {
+      if (seen.has(x.id)) continue;
+      seen.add(x.id);
+      M.moveTask(x.id, dayKey, { fromDay: x.day || null });
+      newKeys.push(`t:${x.id}:${dayKey}`);
+    }
+    for (const x of selGoals()) { M.moveGoal(x.id, { scope: 'day', date: dayKey }); newKeys.push(`g:${x.id}`); }
+  });
+  setSelection(newKeys);
+}
+
+function bulkUnschedule(projectId) {
+  const ids = [...new Set(selTasks().map((x) => x.id))];
+  M.batch(() => { for (const id of ids) M.moveTask(id, '', projectId !== undefined ? { projectId } : {}); });
+  setSelection(ids.map((id) => `t:${id}:`));
+}
+
+function bulkSet(patch) {
+  const ids = [...new Set(selTasks().map((x) => x.id))];
+  M.batch(() => { for (const id of ids) M.updateTask(id, patch); });
+}
+
+function bulkDelete() {
+  const tasks = [...new Set(selTasks().map((x) => x.id))];
+  const goals = selGoals().map((x) => x.id);
+  M.batch(() => { for (const id of tasks) M.deleteTask(id); for (const id of goals) M.deleteGoal(id); });
+  clearSelection();
+  toast(`Deleted ${tasks.length + goals.length} item${tasks.length + goals.length === 1 ? '' : 's'}`, false, { label: 'Undo', fn: undo });
+}
+
+function selectionMenu(e) {
+  const today = startOfDay(new Date());
+  const cats = [...new Set(ev().map((x) => x.category).filter(Boolean))].sort();
+  const n = selectionSize();
+  const tasks = selTasks().length;
+  openMenu(e, [
+    { heading: `${n} selected` },
+    { label: 'Mark done / not done', hint: 'Space', action: bulkDone },
+    '-',
+    { label: 'Move to', items: [
+      { label: 'Today', action: () => bulkMoveTo(isoDate(today)) },
+      { label: 'Tomorrow', action: () => bulkMoveTo(isoDate(addDays(today, 1))) },
+      { label: 'Next week', action: () => bulkMoveTo(isoDate(weekStartOf(addDays(today, 7), ws()))) },
+      '-',
+      { label: 'One day later', hint: 'Alt+→', action: () => bulkShift(1) },
+      { label: 'One day earlier', hint: 'Alt+←', action: () => bulkShift(-1) },
+      { label: 'One week later', action: () => bulkShift(7) },
+      '-',
+      { label: 'Inbox (no date)', disabled: !tasks, action: () => bulkUnschedule() },
+    ] },
+    { label: 'Project', disabled: !tasks, items: [
+      { label: 'None', action: () => bulkSet({ projectId: '' }) },
+      ...state.cfg.data.projects.filter((p) => !p.archived).map((p) => ({ label: p.title, swatch: p.hue, action: () => bulkSet({ projectId: p.id }) })),
+    ] },
+    { label: 'Category', disabled: !tasks, items: [
+      { label: 'None', action: () => bulkSet({ category: '' }) },
+      ...cats.map((c) => ({ label: c, swatch: categoryHue(c), action: () => bulkSet({ category: c }) })),
+    ] },
+    '-',
+    { label: 'Clear selection', hint: 'Esc', action: () => { clearSelection(); } },
+    { label: `Delete ${n}`, hint: 'Del', danger: true, action: bulkDelete },
+  ]);
+}
+
+function selectVisible() {
+  const { first, last } = visibleRange();
+  const keys = [];
+  for (const el of weekEl.querySelectorAll('[data-drag="task"], [data-drag="day-goal"]')) {
+    const day = el.dataset.day || el.closest('[data-day]')?.dataset.day;
+    const i = day ? indexOf(day) : -1;
+    if (i >= first && i <= last) keys.push(keyOf(el));
+  }
+  setSelection(keys);
 }
 
 /* ====================================================================== */
 /* Actions                                                                */
 /* ====================================================================== */
-
-function goWeek(delta) {
-  viewStart = delta === 0 ? weekStartOf(new Date(), ws()) : addDays(viewStart, delta * 7);
-  closePopover();
-  render();
-  scrollToToday();
-}
-
-// On narrow screens the week scrolls sideways; start at today rather than Monday.
-function scrollToToday() {
-  if (scrollEl.scrollWidth <= scrollEl.clientWidth + 4) return;
-  const t = weekEl.querySelector('.day.today');
-  scrollEl.scrollLeft = t ? t.offsetLeft : 0;
-}
 
 function openInline(zone) {
   inline = { zone, value: '', focus: true };
@@ -350,10 +615,10 @@ function submitInline(input) {
     let date = p.dateKey || (type === 'day' ? arg : '');
     if (!date && (p.time || p.repeat !== 'none')) date = todayKey();
     item = M.addTask({ title: p.title || text, date, time: p.time, category: p.category, repeat: p.repeat, projectId });
-    if (date && type === 'day' && date !== arg) toast(`Added to ${dayLabel(parseLocal(date))}`, false, { label: 'Show', fn: () => { viewStart = weekStartOf(parseLocal(date), ws()); flash = item.id; render(); } });
+    if (date && type === 'day' && date !== arg) toast(`Added to ${dayLabel(parseLocal(date))}`, false, { label: 'Show', fn: () => { flash = item.id; scrollToDay(date, { smooth: true }); render(); } });
   } else if (type === 'week' || type === 'dgoal') {
     const p = parseQuick(text, { kind: type === 'week' ? 'week-goal' : 'day-goal' });
-    item = M.addGoal({ scope: type === 'week' ? 'week' : 'day', date: type === 'week' ? isoDate(viewStart) : arg, title: p.title || text, target: p.target });
+    item = M.addGoal({ scope: type === 'week' ? 'week' : 'day', date: type === 'week' ? isoDate(focusWeek) : arg, title: p.title || text, target: p.target });
   }
   flash = item?.id || null;
   inline = { zone, value: '', focus: true }; // keep it open for the next one
@@ -361,8 +626,8 @@ function submitInline(input) {
 }
 
 function carryOver() {
-  const start = isoDate(viewStart);
-  const prev = goalsForWeek(state.cfg.data.goals, addDays(viewStart, -7)).filter((g) => !isGoalDone(g) && g.carriedTo !== start);
+  const start = isoDate(focusWeek);
+  const prev = goalsForWeek(state.cfg.data.goals, addDays(focusWeek, -7)).filter((g) => !isGoalDone(g) && g.carriedTo !== start);
   for (const g of prev) {
     g.carriedTo = start;
     state.cfg.data.goals.push({ id: uid(), scope: 'week', date: start, title: g.title, target: g.target || 1, count: 0, order: g.order });
@@ -393,7 +658,7 @@ function taskMenu(e, id, day) {
       { label: 'Today', action: move(isoDate(today)) },
       { label: 'Tomorrow', action: move(isoDate(addDays(today, 1))) },
       { label: 'Next week', action: move(isoDate(weekStartOf(addDays(today, 7), ws()))) },
-      { label: day ? 'One day later' : 'This week', hint: day ? 'Alt+→' : '', action: move(day ? isoDate(addDays(parseLocal(day), 1)) : isoDate(viewStart)) },
+      { label: day ? 'One day later' : 'Start of the week on screen', hint: day ? 'Alt+→' : '', action: move(day ? isoDate(addDays(parseLocal(day), 1)) : isoDate(focusWeek)) },
       '-',
       { label: 'Inbox (no date)', action: () => M.moveTask(id, ''), disabled: !t.date },
     ] },
@@ -460,6 +725,7 @@ function dayMenu(e, key) {
     { label: 'Add task', hint: 'Double-click', action: () => openInline(`day:${key}`) },
     { label: 'Add goal for the day', action: () => openInline(`dgoal:${key}`) },
     { label: 'Quick add…', hint: 'N', action: () => openQuickAdd({ day: key }) },
+    { label: 'Select everything on this day', action: () => setSelection([...weekEl.querySelectorAll(`.day[data-day="${key}"] [data-drag="task"], .day[data-day="${key}"] [data-drag="day-goal"]`)].map(keyOf)) },
     '-',
     { label: `Mark all done (${open.length})`, disabled: !open.length, action: () => { for (const o of open) M.toggleTask(o.id, key); } },
     { label: 'Move unfinished to the next day', disabled: !open.some((o) => o.repeat === 'none' || !o.repeat), action: () => {
@@ -479,6 +745,19 @@ function onClick(e) {
   const item = e.target.closest('[data-id]');
   const a = act?.dataset.act;
 
+  // Shift/Ctrl/Cmd-click adds or removes a task or day goal from the selection.
+  if ((e.shiftKey || e.ctrlKey || e.metaKey) && item && /^(task|day-goal)$/.test(item.dataset.drag) && a !== 'tick' && a !== 'goal-bump') {
+    toggleSelected(item);
+    return;
+  }
+  if (a === 'week-band') { scrollToDay(act.dataset.week, { smooth: true, before: 0 }); return; }
+  if (a === 'sel-clear') { clearSelection(); return; }
+  if (a === 'sel-menu') { const r = act.getBoundingClientRect(); selectionMenu({ preventDefault() {}, target: act, clientX: r.left, clientY: r.bottom + 6, detail: e.detail }); return; }
+  if (a === 'sel-done') { bulkDone(); return; }
+  if (a === 'sel-delete') { bulkDelete(); return; }
+  if (!item && !act && selectionSize()) { clearSelection(); return; }
+  if (item && selectionSize() && !isSelected(item) && a !== 'tick' && a !== 'goal-bump') clearSelection();
+
   if (a === 'tick' && item) { M.toggleTask(item.dataset.id, item.dataset.day || null); return; }
   if (a === 'goal-bump' && item) { M.bumpGoal(item.dataset.id, e.shiftKey ? -1 : 1); return; }
   if (a === 'goal-edit' && item) { editGoal(item, item.dataset.id); return; }
@@ -490,6 +769,7 @@ function onClick(e) {
   if (a === 'toggle-archived') { showArchived = !showArchived; render(); return; }
   if (a === 'day-menu') { dayMenu(e, act.closest('[data-day]').dataset.day); return; }
 
+  if (item && selectionSize() > 1 && isSelected(item)) { clearSelection(); }
   if (item?.dataset.drag === 'task') { editTask(item, item.dataset.id, item.dataset.day || null); return; }
   if (item && /goal$/.test(item.dataset.drag)) { editGoal(item, item.dataset.id); }
 }
@@ -498,6 +778,8 @@ function onContext(e) {
   if (e.target.closest('input, textarea')) return;
   const item = e.target.closest('[data-id]');
   const day = e.target.closest('[data-zone="day"]');
+  if (item && selectionSize() > 1 && isSelected(item)) return selectionMenu(e);
+  if (item && selectionSize() && !isSelected(item)) clearSelection();
   if (item?.dataset.drag === 'task') return taskMenu(e, item.dataset.id, item.dataset.day || null);
   if (item && /goal$/.test(item.dataset.drag)) {
     // Right-click on the pips removes one, like the shift-click hint says.
@@ -523,7 +805,13 @@ function onDblClick(e) {
   else if (zone === 'projects') newProject();
 }
 
-function onDrop({ kind, id, src, zone, beforeId }) {
+function onDrop({ kind, id, src, zone, beforeId, el }) {
+  if (selectionSize() > 1 && el && isSelected(el)) {
+    if (zone.zone === 'day') bulkMoveTo(zone.day, { anchorDay: src.day || (kind === 'day-goal' ? M.findGoal(id)?.date : null) || null });
+    else if (zone.zone === 'inbox') bulkUnschedule('');
+    else if (zone.zone === 'project') { bulkSet({ projectId: zone.project }); expanded.add(zone.project); }
+    return;
+  }
   if (kind === 'task') {
     const t = M.findTask(id);
     if (zone.zone === 'day') {
@@ -541,7 +829,7 @@ function onDrop({ kind, id, src, zone, beforeId }) {
     }
   } else if (kind === 'day-goal' || kind === 'week-goal') {
     if (zone.zone === 'day') M.moveGoal(id, { scope: 'day', date: zone.day, beforeId });
-    else if (zone.zone === 'week') M.moveGoal(id, { scope: 'week', date: isoDate(viewStart), beforeId });
+    else if (zone.zone === 'week') M.moveGoal(id, { scope: 'week', date: isoDate(focusWeek), beforeId });
   } else if (kind === 'project' && zone.zone === 'projects') {
     M.moveProject(id, beforeId);
   }
@@ -556,10 +844,27 @@ function onKey(e) {
     if (document.querySelector('.pop, .ctx-root')) return;
     e.preventDefault();
     const focusedDay = visible() ? document.activeElement?.closest?.('[data-zone="day"]')?.dataset.day : null;
-    openQuickAdd({ day: focusedDay || undefined, week: visible() ? isoDate(viewStart) : undefined });
+    openQuickAdd({ day: focusedDay || undefined, week: visible() ? isoDate(focusWeek) : undefined });
     return;
   }
-  if (!visible() || inField || mod || document.querySelector('.pop, .ctx-root, .qa-backdrop')) return;
+  if (!visible() || inField || document.querySelector('.pop, .ctx-root, .qa-backdrop')) return;
+  if (mod && e.key.toLowerCase() === 'a' && view === 'week') { e.preventDefault(); selectVisible(); return; }
+  if (mod) return;
+
+  // Keys for a multi-selection.
+  if (selectionSize() > 1) {
+    if (e.key === 'Escape') { e.preventDefault(); clearSelection(); return; }
+    if (e.key === ' ' || e.key === 'x') { e.preventDefault(); bulkDone(); return; }
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); bulkDelete(); return; }
+    if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); bulkShift(e.key === 'ArrowRight' ? 1 : -1); return; }
+    if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+      e.preventDefault();
+      const r = $('selBar').getBoundingClientRect();
+      selectionMenu({ preventDefault() {}, target: $('selBar'), clientX: r.left, clientY: r.top - 8, type: 'keydown' });
+      return;
+    }
+  }
+  if (e.key === 'Escape' && selectionSize()) { clearSelection(); return; }
 
   const item = document.activeElement?.closest?.('[data-id]');
   if (item && root.contains(item)) {
@@ -589,11 +894,11 @@ function onKey(e) {
       e.preventDefault();
       const to = isoDate(addDays(parseLocal(item.dataset.day), e.key === 'ArrowRight' ? 1 : -1));
       M.moveTask(id, to, { fromDay: item.dataset.day });
-      // Follow the task, switching weeks if it crossed the edge.
-      if (to < isoDate(viewStart) || to >= isoDate(addDays(viewStart, 7))) { viewStart = weekStartOf(parseLocal(to), ws()); }
-      render();
+      // Follow the task if it moved off screen.
+      ensureRange(to);
+      if (!isDayVisible(to)) goDays(e.key === 'ArrowRight' ? 1 : -1);
       const moved = [...root.querySelectorAll(`[data-id="${id}"]`)].find((x) => x.dataset.day === to);
-      moved?.focus();
+      moved?.focus({ preventScroll: true });
       return;
     }
     if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
@@ -603,10 +908,10 @@ function onKey(e) {
       return;
     }
   }
-  if (e.altKey) return;
-  if (e.key === 'ArrowLeft' && !item) { e.preventDefault(); goWeek(-1); }
-  else if (e.key === 'ArrowRight' && !item) { e.preventDefault(); goWeek(1); }
-  else if (e.key === 't' || e.key === 'T') { goWeek(0); }
+  if (e.altKey || view !== 'week') return;
+  if (e.key === 'ArrowLeft' && !item) { e.preventDefault(); goDays(e.shiftKey ? -7 : -1); }
+  else if (e.key === 'ArrowRight' && !item) { e.preventDefault(); goDays(e.shiftKey ? 7 : 1); }
+  else if (e.key === 't' || e.key === 'T') { goToday(); }
 }
 
 async function importICS(file) {
@@ -654,13 +959,53 @@ export function initPlan() {
   });
   document.addEventListener('keydown', onKey);
 
-  enableDrag(root, { onDrop, onStart: () => { closePopover(); closeMenu(); } });
+  enableDrag(root, {
+    onDrop,
+    onStart: (d) => {
+      closePopover(); closeMenu();
+      if (selectionSize() && !isSelected(d.el)) clearSelection();
+      // Dragging one of several selected items carries them all.
+      if (selectionSize() > 1) {
+        d.multi = true;
+        root.querySelectorAll('.selected').forEach((x) => x.classList.add('drag-src'));
+      }
+    },
+    onEnd: () => root.querySelectorAll('.drag-src').forEach((x) => x.classList.remove('drag-src')),
+    decorate: (ghost, el) => {
+      if (selectionSize() > 1 && isSelected(el)) {
+        ghost.classList.add('multi');
+        ghost.insertAdjacentHTML('beforeend', `<span class="ghost-count">${selectionSize()}</span>`);
+      }
+    },
+  });
 
-  $('weekPrev').addEventListener('click', () => goWeek(-1));
-  $('weekNext').addEventListener('click', () => goWeek(1));
-  $('weekThis').addEventListener('click', () => goWeek(0));
-  $('planFab').addEventListener('click', () => openQuickAdd({ week: isoDate(viewStart) }));
-  root.querySelectorAll('.view-toggle button').forEach((b) => b.addEventListener('click', () => { view = b.dataset.view; closePopover(); render(); }));
+  // Drag across empty space on the board to select several items.
+  enableMarquee(scrollEl, {
+    canStart: (e) => view === 'week' && !e.target.closest('[data-drag], button, input, textarea, select, a, .wband'),
+  });
+  onSelectionChange(() => { paintSelection(root); renderSelectionBar(); });
+
+  $('weekPrev').addEventListener('click', () => goDays(-7));
+  $('weekNext').addEventListener('click', () => goDays(7));
+  $('weekThis').addEventListener('click', goToday);
+  $('planFab').addEventListener('click', () => openQuickAdd({ week: isoDate(focusWeek) }));
+  root.querySelectorAll('.view-toggle button').forEach((b) => b.addEventListener('click', () => {
+    view = b.dataset.view; closePopover(); clearSelection(); render();
+    if (view === 'week') { positioned = false; sizeColumns(); }
+  }));
+
+  scrollEl.addEventListener('scroll', onScroll, { passive: true });
+  // A plain mouse wheel scrolls the days sideways, unless a day is tall enough to need scrolling down.
+  scrollEl.addEventListener('wheel', (e) => {
+    if (view !== 'week' || e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    const overHeader = e.target.closest('.day-head, .wband');
+    const fitsVertically = scrollEl.scrollHeight <= scrollEl.clientHeight + 1;
+    if (overHeader || fitsVertically || e.shiftKey) {
+      e.preventDefault();
+      scrollEl.scrollLeft += e.deltaY * (e.deltaMode === 1 ? 32 : 1);
+    }
+  }, { passive: false });
+  new ResizeObserver(() => { if (visible() && view === 'week') sizeColumns(); }).observe(scrollEl);
 
   // List view controls
   $('listSearch').addEventListener('input', (e) => { listFilter.q = e.target.value; renderList(); });
@@ -690,22 +1035,32 @@ export function initPlan() {
 
   setQuickAddHandler(({ kind, item }) => {
     flash = item.id;
-    if (kind === 'task' && item.date && visible()) {
-      const d = parseLocal(item.date);
-      if (d < viewStart || d >= addDays(viewStart, 7)) viewStart = weekStartOf(d, ws());
-    }
     if (kind === 'task' && item.projectId) expanded.add(item.projectId);
-    if (kind === 'week-goal' && visible()) viewStart = weekStartOf(parseLocal(item.date), ws());
     render();
+    if (visible() && view === 'week') {
+      if (kind === 'task' && item.date) revealDay(item.date);
+      if (kind === 'day-goal') revealDay(item.date);
+      if (kind === 'week-goal' && isoDate(focusWeek) !== item.date) scrollToDay(item.date, { smooth: true, before: 0 });
+    }
   });
 
   onChange((reason) => {
-    if (reason === 'board') viewStart = weekStartOf(viewStart, ws());
+    if (reason === 'board') {
+      // Week start changed: realign the range to whole weeks without moving what's on screen.
+      const keep = positioned ? keyAt(visibleRange().first) : todayKey();
+      rangeStart = weekStartOf(rangeStart, ws());
+      focusWeek = weekStartOf(focusWeek, ws());
+      render();
+      if (positioned) scrollEl.scrollLeft = indexOf(keep) * colW;
+      return;
+    }
     render();
   });
   // Roll over to a new day at midnight.
   let day = todayKey();
   setInterval(() => { if (todayKey() !== day) { day = todayKey(); render(); } }, 60000);
   render();
-  new MutationObserver(() => { if (visible()) scrollToToday(); }).observe(root, { attributes: true, attributeFilter: ['hidden'] });
+  // The tab starts hidden, so columns are sized (and scrolled to today) the first time it's shown.
+  new MutationObserver(() => { if (visible() && view === 'week') { sizeColumns(); render({ timeline: false }); } }).observe(root, { attributes: true, attributeFilter: ['hidden'] });
+  if (visible()) { sizeColumns(); render({ timeline: false }); }
 }

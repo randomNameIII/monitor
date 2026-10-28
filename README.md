@@ -42,7 +42,9 @@ It's a plain static site (HTML, CSS and JavaScript modules, no build step), so G
 
 **Plan tab**
 
-A week board with a column per day, plus your week goals, projects and an inbox beside it.
+A continuous strip of days that scrolls sideways as far as you like in either direction (it loads more weeks as you go), with your goals, projects and an inbox beside it. Thin bands along the top mark each week and show its goal progress; the Goals list in the sidebar follows the week on screen.
+
+- **Moving around.** Scroll with the mouse wheel or trackpad, <kbd>←</kbd>/<kbd>→</kbd> for a day, <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> or the arrow buttons for a week, <kbd>T</kbd> or **Today** to jump back. Click a week band to line that week up.
 
 - **Adding things.** Press <kbd>N</kbd> (or Ctrl/Cmd+K, or the big round + button) from any tab. Type naturally and the preview shows what was understood:
   - `Lab report fri 5pm #school` → Friday at 5pm, category school
@@ -53,13 +55,14 @@ A week board with a column per day, plus your week goals, projects and an inbox 
 
   <kbd>Tab</kbd> switches between task, daily goal, weekly goal (`Gym 3x` sets how many times) and project (`Paper due nov 20`). <kbd>Shift</kbd>+<kbd>Enter</kbd> adds and keeps the box open for the next one.
 - **Mouse shortcuts.** Double-click a day to type straight into it (Enter adds and keeps the box open). Middle-click a day for quick add with that day filled in. Hover a day header for "+ goal".
-- **Drag** tasks between days, onto a project, into the inbox, or from a project or the overdue list onto a day. Drag goals between days or into the week goals, and drag projects to reorder them.
+- **Drag** tasks between days, onto a project, into the inbox, or from a project or the overdue list onto a day. Drag goals between days or into the week goals, and drag projects to reorder them. Hold a dragged item near the edge to scroll.
+- **Select several at once.** Drag across empty space to draw a box around tasks and day goals (hold Shift to add to what's selected), Shift/Ctrl-click to pick individual ones, or Ctrl+A for everything on screen. Then drag any of them to move them all (they keep their spacing), right-click for bulk options, or use <kbd>Space</kbd> (done), <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> (shift a day), <kbd>Delete</kbd>. <kbd>Esc</kbd> clears the selection. Bulk changes undo in one step.
 - **Right-click** anything for options: mark done, move to today/tomorrow/next week, set the project or category, duplicate, delete. Right-click a day header to mark everything done or push unfinished tasks to the next day.
 - **Click** a task to edit it in place (date, time, repeat, project, category, notes). Changes save as you type.
-- **Keyboard** on a focused task: <kbd>Space</kbd> done, <kbd>Enter</kbd> edit, <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> move a day, <kbd>Delete</kbd> delete. <kbd>←</kbd>/<kbd>→</kbd> change week, <kbd>T</kbd> back to this week.
+- **Keyboard** on a focused task: <kbd>Space</kbd> done, <kbd>Enter</kbd> edit, <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> move a day, <kbd>Delete</kbd> delete. <kbd>←</kbd>/<kbd>→</kbd> scroll a day, <kbd>T</kbd> back to today.
 - **Goals**: daily goals sit at the top of each day; week goals are in the sidebar with a progress bar. Click the marks of a "3x" goal to count one; Shift+click or right-click removes one. When a week ends with goals unfinished, the next week offers to bring them over.
 - **Projects** fill their progress bar from their tasks (or a manual slider if they have none) and show days left. Expand one to see and add its tasks.
-- **Overdue** tasks from earlier weeks collect in the sidebar so you can drag them onto a day.
+- **Overdue** tasks that have scrolled off the left of the screen collect in the sidebar so you can drag them onto a day.
 - **List view** shows everything in one searchable table, with .ics import (Canvas, Google Calendar, Outlook) and a button to clear out finished items.
 - Every change can be undone (Ctrl+Z), and deletes show an Undo button.
 
@@ -138,6 +141,7 @@ js/
       quickadd.js       the quick add box
       model.js          changes to tasks, goals and projects
       editors.js        in-place editors
+      select.js         box-select and multi-selection
       drag.js menu.js popover.js   drag and drop, right-click menus, popovers
 docs/
   creating-panels.md
