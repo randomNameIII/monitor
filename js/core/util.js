@@ -93,6 +93,8 @@ export function occurrences(events, { from = new Date(), days = 30, categories =
     const push = (d) => {
       if (until && d >= until) return false;
       if (d >= windowEnd) return false;
+      // Single days removed from a repeat ("delete just this one") are listed in skip.
+      if (ev.skip?.length && ev.skip.includes(isoDate(d))) return true;
       if (ends(d) > from && d >= windowStart - 86400000) {
         // Repeating tasks are ticked off per day (doneOn); one-off tasks use done.
         const done = repeat === 'none' ? !!ev.done : (ev.doneOn || []).includes(isoDate(d));

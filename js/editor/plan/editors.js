@@ -50,7 +50,8 @@ export function editTask(anchor, id, day = null) {
       </div>
       ${repeating && day ? `<p class="pop-note">Repeats. Ticking off marks only ${esc(parseLocal(day).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }))}.</p>` : ''}
       <div class="pop-grid">
-        <label class="pf"><span>Date<button type="button" class="link pf-clear" data-f="unschedule" ${t.date ? '' : 'hidden'}>No date</button></span><input type="date" data-f="date" value="${esc(t.date || '')}"></label>
+        <label class="pf"><span>Do it on<button type="button" class="link pf-clear" data-f="unschedule" ${t.date ? '' : 'hidden'}>No date</button></span><input type="date" data-f="date" value="${esc(t.date || '')}"></label>
+        <label class="pf"><span>Due<button type="button" class="link pf-clear" data-f="nodue" ${t.due ? '' : 'hidden'}>Clear</button></span><input type="date" data-f="due" value="${esc(t.due || '')}"></label>
         ${field('Repeats', `<select data-f="repeat">${REPEATS.map(([v, l]) => `<option value="${v}" ${v === (t.repeat || 'none') ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}
         <div class="pf pf-wide"><span>Time</span><div class="pf-time"><input type="time" data-f="time" value="${esc(t.time || '')}" aria-label="Start"><i>to</i><input type="time" data-f="end" value="${esc(t.end || '')}" aria-label="End" ${t.time ? '' : 'disabled'}></div></div>
         ${field('Until', `<input type="date" data-f="until" value="${esc(t.until || '')}">`, `pf-wide pf-until${repeating ? '' : ' hidden'}`)}
@@ -67,11 +68,17 @@ export function editTask(anchor, id, day = null) {
       <div class="pop-actions">
         <button type="button" class="btn ghost small" data-f="duplicate">Duplicate</button>
         <span class="spacer"></span>
-        <button type="button" class="btn danger small" data-f="delete">Delete</button>
+        ${repeating && day ? '<button type="button" class="btn ghost small" data-f="skip">Skip this day</button>' : ''}
+        <button type="button" class="btn danger small" data-f="delete">${repeating ? 'Delete all' : 'Delete'}</button>
       </div>`;
 
     const q = (f) => el.querySelector(`[data-f="${f}"]`);
     const cur = () => M.findTask(id);
+    q('skip')?.addEventListener('click', () => {
+      M.skipOccurrence('task', id, day);
+      closePopover();
+      toast(`Skipped ${parseLocal(day).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}`, false, { label: 'Undo', fn: undo });
+    });
     const title = q('title');
     const grow = () => { title.style.height = 'auto'; title.style.height = `${title.scrollHeight}px`; };
     requestAnimationFrame(grow);
@@ -113,6 +120,14 @@ export function editTask(anchor, id, day = null) {
       drawDays();
     });
     q('until').addEventListener('change', (e) => M.updateTask(id, { until: e.target.value }));
+    q('due').addEventListener('change', (e) => {
+      const patch = { due: e.target.value };
+      // A task with no day yet is planned for its due day.
+      if (e.target.value && !cur().date) { patch.date = e.target.value; q('date').value = e.target.value; q('unschedule').hidden = false; }
+      M.updateTask(id, patch);
+      q('nodue').hidden = !e.target.value;
+    });
+    q('nodue').addEventListener('click', () => { M.updateTask(id, { due: '' }); q('due').value = ''; q('nodue').hidden = true; });
 
     // Weekday chips for weekly repeats: pick several for a Mon/Wed/Fri class.
     function drawDays() {
@@ -200,7 +215,7 @@ export function editTask(anchor, id, day = null) {
 
 const NOTE_REPEATS = [['none', 'Doesn’t repeat'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['yearly', 'Every year'], ['daily', 'Every day']];
 
-export function editNoteDetails(anchor, id, { focusEnd = false } = {}) {
+export function editNoteDetails(anchor, id, { focusEnd = false, day = null } = {}) {
   const n = M.findNote(id);
   if (!n) return;
   openPopover(anchor, (el) => {
@@ -213,12 +228,15 @@ export function editNoteDetails(anchor, id, { focusEnd = false } = {}) {
         <label class="pf"><span>To<button type="button" class="link pf-clear" data-f="oneday" ${n.end ? '' : 'hidden'}>One day</button></span><input type="date" data-f="end" value="${esc(n.end || '')}" min="${esc(n.date)}"></label>
         ${field('Repeats', `<select data-f="repeat">${NOTE_REPEATS.map(([v, l]) => `<option value="${v}" ${v === (n.repeat || 'none') ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}
         ${field('Until', `<input type="date" data-f="until" value="${esc(n.until || '')}">`, `pf-until${repeating ? '' : ' hidden'}`)}
+        ${field('Category', `<input data-f="category" list="popNoteCats" value="${esc(n.category || '')}" placeholder="none"><datalist id="popNoteCats">${M.allCategories().map((c) => `<option value="${esc(c)}">`).join('')}</datalist>`, 'pf-wide')}
       </div>
+      ${n.skip?.length ? `<p class="pop-note small">${n.skip.length} day${n.skip.length === 1 ? '' : 's'} skipped. <button type="button" class="link" data-f="unskip">Bring them back</button></p>` : ''}
       <p class="pop-note small">Tip: drag a note’s right edge across days on the board to stretch it, or its ends to change the dates.</p>
       <div class="pop-actions">
         <button type="button" class="btn ghost small" data-f="task">Make it a task</button>
         <span class="spacer"></span>
-        <button type="button" class="btn danger small" data-f="delete">Delete</button>
+        ${repeating && day ? '<button type="button" class="btn ghost small" data-f="skip">Skip this day</button>' : ''}
+        <button type="button" class="btn danger small" data-f="delete">${repeating ? 'Delete all' : 'Delete'}</button>
       </div>`;
     const q = (f) => el.querySelector(`[data-f="${f}"]`);
     const cur = () => M.findNote(id);
@@ -249,6 +267,13 @@ export function editNoteDetails(anchor, id, { focusEnd = false } = {}) {
       el.querySelector('.pf-until').classList.toggle('hidden', e.target.value === 'none');
     });
     q('until').addEventListener('change', (e) => M.updateNote(id, { until: e.target.value }));
+    q('category').addEventListener('change', (e) => { const c = M.canonicalCategory(e.target.value); M.updateNote(id, { category: c }); e.target.value = c; });
+    q('skip')?.addEventListener('click', () => {
+      M.skipOccurrence('note', id, day);
+      closePopover();
+      toast('Skipped that day', false, { label: 'Undo', fn: undo });
+    });
+    q('unskip')?.addEventListener('click', (e) => { M.updateNote(id, { skip: [] }); e.target.closest('p').remove(); });
     q('task').addEventListener('click', () => {
       const c = cur();
       M.batch(() => { M.addTask({ title: c.text, date: c.date }); M.deleteNote(id); });
@@ -267,11 +292,11 @@ const CAT_HUES = [0, 20, 38, 55, 90, 140, 170, 195, 215, 240, 270, 300, 330];
 export function editCategory(anchor, name, hueOf) {
   let current = name;
   openPopover(anchor, (el) => {
-    const count = state.cfg.data.events.filter((e) => (e.category || '').toLowerCase() === name.toLowerCase()).length;
+    const count = [...state.cfg.data.events, ...(state.cfg.data.notes || [])].filter((e) => (e.category || '').toLowerCase() === name.toLowerCase()).length;
     const custom = state.cfg.data.categoryColors?.[name.toLowerCase()] != null;
     el.innerHTML = `
       <input class="pop-title cat-name" data-f="name" value="${esc(name)}" aria-label="Category name" spellcheck="false">
-      <p class="pop-note">${count} task${count === 1 ? '' : 's'}. Renaming changes every one of them; you can fix capitals here too.</p>
+      <p class="pop-note">Used by ${count} task${count === 1 ? '' : 's'} and notes. Renaming changes all of them; you can fix capitals here too.</p>
       <div class="pf pf-wide"><span>Color</span>
         <div class="hues cat-hues">
           <button type="button" class="hue auto${custom ? '' : ' on'}" data-hue="" title="Automatic color" aria-label="Automatic color">A</button>

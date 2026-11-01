@@ -56,11 +56,11 @@ export function createParsed(p, ctx = {}) {
       const name = p.newProject[0].toUpperCase() + p.newProject.slice(1);
       projectId = (state.cfg.data.projects.find((x) => x.title.toLowerCase() === name.toLowerCase()) || M.addProject({ title: name })).id;
     }
-    const item = M.addTask({ title: p.title, date: p.dateKey, time: p.time, end: p.end, category: p.category, repeat: p.repeat, weekdays: p.weekdays, priority: p.priority, projectId });
+    const item = M.addTask({ title: p.title, date: p.dateKey, time: p.time, end: p.end, due: p.dueKey, category: p.category, repeat: p.repeat, weekdays: p.weekdays, priority: p.priority, projectId });
     return { kind: 'task', item, where: p.dateKey ? dayLabel(p.date) : projectId ? M.findProject(projectId).title : 'Inbox' };
   }
   if (k === 'note') {
-    const item = M.addNote({ date: p.dateKey, end: p.endKey, text: p.title, repeat: p.repeat, weekdays: p.weekdays, until: p.untilKey });
+    const item = M.addNote({ date: p.dateKey, end: p.endKey, text: p.title, repeat: p.repeat, weekdays: p.weekdays, until: p.untilKey, category: p.category });
     return { kind: 'note', item, where: p.endKey ? `notes, ${dayLabel(p.date)} to ${dayLabel(p.endDate)}` : `notes for ${dayLabel(p.date)}` };
   }
   if (k === 'day-goal' || k === 'week-goal') {
@@ -90,6 +90,8 @@ function chips(p) {
     if (p.date) chip('◷', `${dayLabel(p.date)}${p.time ? `, ${formatTimeRange(p.dateKey, p.time, p.end)}` : ''}`);
     else chip('▢', 'No date: goes to the inbox', 'muted');
     if (p.repeat !== 'none') chip('↻', p.weekdays?.length > 1 ? `Every ${weekdaysLabel(p.weekdays).replace('Weekdays', 'weekday').replace('Weekends', 'weekend')}` : REPEAT_LABEL[p.repeat]);
+    if (p.due && p.dueKey !== p.dateKey) chip('⚑', `Due ${dayLabel(p.due)}`, 'prio');
+    else if (p.due) chip('⚑', 'Due that day', 'prio');
     if (p.priority) chip('!', ['', 'Priority', 'High priority', 'Urgent'][p.priority], 'prio');
     if (p.category) chip('#', p.category);
     if (p.project) chip('◆', p.project.title);
@@ -98,6 +100,7 @@ function chips(p) {
     if (p.endDate) chip('◷', `${dayLabel(p.date)} to ${dayLabel(p.endDate)}`);
     else chip('◷', dayLabel(p.date));
     if (p.repeat !== 'none') chip('↻', `${p.weekdays?.length > 1 ? `Every ${weekdaysLabel(p.weekdays)}` : REPEAT_LABEL[p.repeat]}${p.until ? ` until ${dayLabel(p.until)}` : ''}`);
+    if (p.category) chip('#', p.category);
     chip('✎', p.endDate ? 'One note across those days' : 'A note on the day, not a task', 'muted');
   } else if (kind === 'day-goal') {
     chip('◷', dayLabel(p.date));

@@ -4,7 +4,7 @@
 import { state, commit } from '../state.js';
 import { uid } from '../../core/config.js';
 import { isoDate, addDays, parseLocal, daysBetween } from '../../core/util.js';
-import { isGoalDone, byOrder } from '../../core/planning.js';
+import { isGoalDone, byOrder, categoryHue } from '../../core/planning.js';
 
 export const data = () => state.cfg.data;
 export const findTask = (id) => data().events.find((e) => e.id === id);
@@ -31,6 +31,7 @@ export function addTask(fields) {
     projectId: fields.projectId || '', done: false,
   };
   if (fields.end && t.time) t.end = fields.end;
+  if (fields.due) t.due = fields.due;
   if (fields.priority) t.priority = fields.priority;
   if (fields.weekdays?.length > 1 && t.repeat === 'weekly') t.weekdays = [...fields.weekdays];
   if (fields.steps?.length) t.steps = fields.steps.map((x) => ({ id: uid(), title: x.title, done: !!x.done }));
@@ -80,6 +81,7 @@ export function moveTask(id, toDay, { fromDay = null, beforeId = null, projectId
     t.doneOn = (t.doneOn || []).map((d) => isoDate(addDays(parseLocal(d), delta)));
     // A Mon/Wed/Fri class dragged a day later becomes Tue/Thu/Sat.
     if (t.weekdays?.length) t.weekdays = t.weekdays.map((w) => (((w + delta) % 7) + 7) % 7);
+    if (t.skip?.length) t.skip = t.skip.map((d) => isoDate(addDays(parseLocal(d), delta)));
   } else {
     t.date = toDay || '';
     if (!toDay) { t.time = ''; t.end = ''; t.repeat = 'none'; t.until = ''; delete t.weekdays; }
@@ -208,7 +210,7 @@ export function deleteGoal(id) {
 
 /* ---------------- categories ---------------- */
 
-export const allCategories = () => [...new Set(data().events.map((e) => e.category).filter(Boolean))]
+export const allCategories = () => [...new Set([...data().events, ...(data().notes || [])].map((e) => e.category).filter(Boolean))]
   .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
 // "eng111" typed when "ENG111" already exists → "ENG111", so one category doesn't split in two.
@@ -231,15 +233,19 @@ export function renameCategory(from, to) {
   const target = String(to || '').trim();
   if (!target) return;
   const lo = from.toLowerCase();
-  for (const e of data().events) if ((e.category || '').toLowerCase() === lo) e.category = target;
+  for (const e of [...data().events, ...(data().notes || [])]) if ((e.category || '').toLowerCase() === lo) e.category = target;
   const map = colorsMap();
-  if (map[lo] != null && target.toLowerCase() !== lo) { if (map[target.toLowerCase()] == null) map[target.toLowerCase()] = map[lo]; delete map[lo]; }
+  // Keep the color it had (custom or automatic), unless the new name already has one of its own.
+  if (target.toLowerCase() !== lo) {
+    if (map[target.toLowerCase()] == null) map[target.toLowerCase()] = categoryHue(from, map);
+    delete map[lo];
+  }
   save();
 }
 
 export function deleteCategory(name) {
   const lo = name.toLowerCase();
-  for (const e of data().events) if ((e.category || '').toLowerCase() === lo) e.category = '';
+  for (const e of [...data().events, ...(data().notes || [])]) if ((e.category || '').toLowerCase() === lo) e.category = '';
   delete colorsMap()[lo];
   save();
 }
@@ -250,9 +256,10 @@ const notesList = () => (data().notes ||= []);
 export const findNote = (id) => notesList().find((n) => n.id === id);
 
 // A note on one day, or across days when `end` is set; it can repeat like a task.
-export function addNote({ date, end = '', text, repeat = 'none', weekdays = null, until = '' }) {
+export function addNote({ date, end = '', text, repeat = 'none', weekdays = null, until = '', category = '' }) {
   const n = { id: uid(), date, text: String(text || '').trim() };
   if (!n.text || !date) return null;
+  if (category) n.category = canonicalCategory(category);
   if (end && end > date) n.end = end;
   if (repeat && repeat !== 'none') { n.repeat = repeat; if (until) n.until = until; if (weekdays?.length > 1) n.weekdays = [...weekdays]; }
   n.order = nextOrder(notesList().filter((x) => x.date === date));
@@ -281,7 +288,16 @@ export function moveNote(id, { toDay, fromDay = null, beforeId = null }) {
   if (n.end) n.end = shift(n.end);
   if (n.until) n.until = shift(n.until);
   if (n.weekdays?.length) n.weekdays = n.weekdays.map((w) => (((w + delta) % 7) + 7) % 7);
+  if (n.skip?.length) n.skip = n.skip.map(shift);
   reorderInto(notesList().filter((x) => x !== n && x.date === n.date), n, beforeId);
+  save();
+}
+
+// Remove one day from a repeating note or task, leaving the rest of the series.
+export function skipOccurrence(kind, id, day) {
+  const x = kind === 'note' ? findNote(id) : findTask(id);
+  if (!x || !day) return;
+  x.skip = [...new Set([...(x.skip || []), day])];
   save();
 }
 

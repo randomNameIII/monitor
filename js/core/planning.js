@@ -2,13 +2,15 @@
 // Shared by the editor's Plan tab and the wall panels.
 //
 // Data lives in config.data:
-//   events   [{ id, title, date?, time?, category?, repeat, until?, done?, doneOn?[], projectId?, notes?, order? }]
+//   events   [{ id, title, date?, time?, due?, category?, repeat, until?, skip?[], done?, doneOn?[], projectId?, notes?, order? }]
+//            `date` is the day you plan to do it; `due` is when it's due (they can differ).
 //            An item without a date is an unscheduled task (inbox, or a project's backlog).
 //   goals    [{ id, scope: 'day'|'week', date, title, target, count, order? }]
 //            Week goals use the first day of their week as `date`.
 //   projects [{ id, title, hue, due?, archived?, progress?, notes?, order? }]
 //            `progress` (0–100) is only used for projects that have no tasks.
-//   notes    [{ id, date, end?, text, repeat?, until?, order? }]   notes on a day, or across days when `end` is set
+//   notes    [{ id, date, end?, text, category?, repeat?, until?, skip?[], order? }]   on a day, or across days when `end` is set
+//            `skip` lists single days removed from a repeat.
 //   categoryColors { [lowercase category]: hue }   colors you picked for categories
 
 import { isoDate, addDays, weekStartOf, parseLocal, daysBetween, occurrences } from './util.js';
@@ -37,7 +39,7 @@ export function noteOccurrences(notes, from, days) {
     if (!n.repeat || n.repeat === 'none') starts.push(n.date);
     else {
       // Reuse the task repeat rules; start early enough to catch a long note already in progress.
-      const fake = { id: n.id, title: 'x', date: n.date, repeat: n.repeat, until: n.until || '', weekdays: n.weekdays };
+      const fake = { id: n.id, title: 'x', date: n.date, repeat: n.repeat, until: n.until || '', weekdays: n.weekdays, skip: n.skip };
       for (const o of occurrences([fake], { from: addDays(from, -len), days: days + len })) starts.push(o.day);
     }
     for (const start of starts) {

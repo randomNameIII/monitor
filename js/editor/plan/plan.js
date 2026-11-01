@@ -67,10 +67,11 @@ function edgeHue(t) {
 function taskCard(t, { day = '', compact = false, showDate = false } = {}) {
   const done = day ? M.isTaskDoneOn(t, day) : !!t.done;
   const repeating = t.repeat && t.repeat !== 'none';
-  const overdue = !done && day && day < todayKey() && !repeating;
+  const overdue = !done && ((day && day < todayKey() && !repeating) || (t.due && t.due < todayKey()));
   const hue = edgeHue(t);
   const proj = t.projectId && M.findProject(t.projectId);
   const meta = [];
+  if (t.due) meta.push(dueLabel(t, day, done));
   if (showDate && t.date) meta.push(`<span class="m-date">${esc(dayLabel(parseLocal(t.date)))}</span>`);
   if (t.time) meta.push(`<span class="m-time">${formatTimeRange(t.date || todayKey(), t.time, t.end)}</span>`);
   if (repeating) meta.push(`<span title="${repeatLabel(t)}">↻</span>`);
@@ -79,7 +80,7 @@ function taskCard(t, { day = '', compact = false, showDate = false } = {}) {
   if (proj && !compact) meta.push(`<span class="m-proj">${esc(proj.title)}</span>`);
   if (t.notes) meta.push('<span title="Has notes">¶</span>');
   return `<li class="task${done ? ' done' : ''}${overdue ? ' overdue' : ''}${t.priority ? ` p${t.priority}` : ''}${flash === t.id ? ' flash' : ''}" tabindex="0"
-      data-drag="task" data-id="${t.id}" data-day="${day}" data-ordered="${t.time ? 'false' : 'true'}"
+      data-drag="task" data-id="${t.id}" data-day="${day}" data-ordered="${t.time ? 'false' : 'true'}"${t.due ? ` data-due="${t.due}"` : ''}
       ${hue != null ? `style="--h:${hue}"` : ''}>
       <button type="button" class="tick${done ? ' on' : ''}" data-act="tick" aria-label="${done ? 'Mark not done' : 'Mark done'}"></button>
       <div class="task-main">
@@ -87,6 +88,15 @@ function taskCard(t, { day = '', compact = false, showDate = false } = {}) {
         ${meta.length ? `<span class="task-meta">${meta.join('')}</span>` : ''}
       </div>
     </li>`;
+}
+
+// "⚑ Due Fri" — orange when it's due within two days, red when it's past due.
+function dueLabel(t, day, done) {
+  const today = todayKey();
+  const n = daysBetween(parseLocal(today), parseLocal(t.due));
+  const when = t.due === day ? 'Due this day' : n === 0 ? 'Due today' : n === 1 ? 'Due tomorrow' : n < 0 ? `${-n} day${n === -1 ? '' : 's'} late` : `Due ${dayLabel(parseLocal(t.due))}`;
+  const cls = done ? '' : n < 0 ? ' late' : n <= 2 ? ' soon' : '';
+  return `<span class="m-due${cls}" title="Due ${parseLocal(t.due).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}">⚑ ${when}</span>`;
 }
 
 function pips(g) {
@@ -114,7 +124,8 @@ function noteItem(n, day) {
     return `<li class="dnote editing"><input data-inline="editnote:${n.id}" value="${esc(inline.value ?? n.text)}" aria-label="Edit note"></li>`;
   }
   const rep = n.repeat && n.repeat !== 'none';
-  return `<li class="dnote${flash === n.id ? ' flash' : ''}" tabindex="0" data-drag="note" data-id="${n.id}" data-day="${day}" title="Note · click to edit · drag the right edge across days to stretch it · right-click for more">${esc(n.text)}${rep ? ' <span class="n-rep" aria-label="Repeats">↻</span>' : ''}<span class="note-grip" data-grip="end" data-nodrag aria-hidden="true"></span></li>`;
+  const hue = n.category ? catHue(n.category) : null;
+  return `<li class="dnote${hue != null ? ' has-cat' : ''}${flash === n.id ? ' flash' : ''}" tabindex="0" data-drag="note" data-id="${n.id}" data-day="${day}"${hue != null ? ` style="--h:${hue}"` : ''} title="Note · click to edit · drag the right edge across days to stretch it · right-click for more">${esc(n.text)}${rep ? ' <span class="n-rep" aria-label="Repeats">↻</span>' : ''}<span class="note-grip" data-grip="end" data-nodrag aria-hidden="true"></span></li>`;
 }
 
 // One-day notes for a day (multi-day notes are drawn as bars instead).
@@ -140,8 +151,9 @@ const SHORT = (k) => parseLocal(k).toLocaleDateString(undefined, { month: 'short
 
 function spanBar(o, { s, e, lane, contL, contR, style }) {
   const rep = o.note.repeat && o.note.repeat !== 'none';
-  return `<div class="span-bar${contL ? ' cont-l' : ''}${contR ? ' cont-r' : ''}${flash === o.note.id ? ' flash' : ''}" tabindex="0"
-      data-drag="note" data-id="${o.note.id}" data-day="${o.start}" data-span="1" data-lane="${lane}" data-s="${s}" data-e="${e}" style="${style}"
+  const hue = o.note.category ? catHue(o.note.category) : null;
+  return `<div class="span-bar${hue != null ? ' has-cat' : ''}${contL ? ' cont-l' : ''}${contR ? ' cont-r' : ''}${flash === o.note.id ? ' flash' : ''}" tabindex="0"
+      data-drag="note" data-id="${o.note.id}" data-day="${o.start}" data-span="1" data-lane="${lane}" data-s="${s}" data-e="${e}" style="${style}${hue != null ? `;--h:${hue}` : ''}"
       title="${esc(o.note.text)} · ${SHORT(o.start)} – ${SHORT(o.end)} · drag to move, drag an end to change the dates">
       ${contL ? '' : '<span class="span-h l" data-grip="start" data-nodrag aria-hidden="true"></span>'}
       <span class="span-text">${esc(o.note.text)}</span><span class="span-dates">${SHORT(o.start)} – ${SHORT(o.end)}${rep ? ' ↻' : ''}</span>
@@ -251,12 +263,12 @@ function monthGrid() {
 function miniTask(t, day) {
   const done = M.isTaskDoneOn(t, day);
   const hue = edgeHue(t);
-  const overdue = !done && day < todayKey() && !(t.repeat && t.repeat !== 'none');
+  const overdue = !done && ((day < todayKey() && !(t.repeat && t.repeat !== 'none')) || (t.due && t.due < todayKey()));
   const time = t.time ? formatTime(parseLocal(day, t.time)).replace(':00', '').replace(' ', '') : '';
   return `<li class="task mini${done ? ' done' : ''}${overdue ? ' overdue' : ''}${t.priority ? ` p${t.priority}` : ''}${flash === t.id ? ' flash' : ''}" tabindex="0"
-      data-drag="task" data-id="${t.id}" data-day="${day}" data-ordered="${t.time ? 'false' : 'true'}" ${hue != null ? `style="--h:${hue}"` : ''}>
+      data-drag="task" data-id="${t.id}" data-day="${day}" data-ordered="${t.time ? 'false' : 'true'}"${t.due ? ` data-due="${t.due}"` : ''} ${hue != null ? `style="--h:${hue}"` : ''}>
       <button type="button" class="tick" data-act="tick" aria-label="${done ? 'Mark not done' : 'Mark done'}"></button>
-      <span class="task-title">${esc(t.title)}</span>${time ? `<span class="m-time">${time}</span>` : ''}
+      <span class="task-title">${t.due ? `<b class="m-flag${!done && t.due < todayKey() ? ' late' : ''}" title="Due ${SHORT(t.due)}">⚑</b>` : ''}${esc(t.title)}</span>${time ? `<span class="m-time">${time}</span>` : ''}
     </li>`;
 }
 
@@ -518,10 +530,10 @@ function renderSide() {
   // Categories: colors and names. Drop a task on one to set its category.
   const cats = M.allCategories();
   const counts = new Map();
-  for (const t of ev()) if (t.category) counts.set(t.category, (counts.get(t.category) || 0) + 1);
+  for (const t of [...ev(), ...(state.cfg.data.notes || [])]) if (t.category) counts.set(t.category, (counts.get(t.category) || 0) + 1);
   const catBlock = `<section class="side-block cats-block">
     <header><h2>Categories</h2></header>
-    ${cats.length ? `<ul class="cat-list">${cats.map((c) => `<li><button type="button" class="cat-chip" data-act="cat-edit" data-cat="${esc(c)}" data-drop data-accept="task" data-zone="category" style="--h:${catHue(c)}" title="Change color or rename · drop tasks here to tag them">
+    ${cats.length ? `<ul class="cat-list">${cats.map((c) => `<li><button type="button" class="cat-chip" data-act="cat-edit" data-cat="${esc(c)}" data-drop data-accept="task note" data-zone="category" style="--h:${catHue(c)}" title="Change color or rename · drop tasks here to tag them">
       <i></i><span>${esc(c)}</span><b>${counts.get(c) || 0}</b></button></li>`).join('')}</ul>`
       : '<p class="side-hint">Type #name when adding a task (like #ENG111) to give it a category. Its color shows on the task’s edge, here and on the wall.</p>'}
   </section>`;
@@ -628,11 +640,12 @@ function renderList() {
     const next = repeating ? occurrences([t], { from: new Date(), days: 400 })[0] : null;
     const at = next ? next.at : t.date ? parseLocal(t.date, t.time) : null;
     const when = at ? `${next ? 'Next: ' : ''}${dayLabel(at)}${t.time ? `, ${formatTimeRange(isoDate(at), t.time, t.end)}` : ''}` : '<span class="muted">No date</span>';
+    const dueTxt = t.due ? ` · ⚑ due ${SHORT(t.due)}` : '';
     const proj = M.findProject(t.projectId);
     const done = repeating ? false : !!t.done;
     return `<tr data-row="${t.id}" class="${done ? 'done' : ''}${!done && !repeating && t.date && t.date < today ? ' overdue' : ''}">
       <td class="c-tick"><button type="button" class="tick${done ? ' on' : ''}" data-act="list-tick" ${repeating ? 'disabled title="Tick repeating tasks off on the week board"' : ''} aria-label="Done"></button></td>
-      <td class="nowrap">${at ? esc(when) : when}</td>
+      <td class="nowrap">${at ? esc(when) : when}${dueTxt ? `<span class="m-due${!t.done && t.due < today ? ' late' : ''}">${esc(dueTxt)}</span>` : ''}</td>
       <td class="c-title">${esc(t.title)}${t.source ? ` <span class="muted small">from ${esc(t.source)}</span>` : ''}</td>
       <td>${proj ? `<span class="m-proj" style="--h:${proj.hue}">${esc(proj.title)}</span>` : ''}</td>
       <td>${t.category ? `#${esc(t.category)}` : ''}</td>
@@ -765,12 +778,20 @@ function bulkSet(patch) {
   M.batch(() => { for (const id of ids) M.updateTask(id, patch); });
 }
 
+// Deletes the selection. Selected days of repeating tasks are removed one by one; the rest of the series stays.
 function bulkDelete() {
-  const tasks = [...new Set(selTasks().map((x) => x.id))];
+  const sel = selTasks();
+  const repeatingDays = sel.filter((x) => x.day && M.findTask(x.id)?.repeat && M.findTask(x.id).repeat !== 'none');
+  const whole = [...new Set(sel.filter((x) => !repeatingDays.includes(x)).map((x) => x.id))];
   const goals = selGoals().map((x) => x.id);
-  M.batch(() => { for (const id of tasks) M.deleteTask(id); for (const id of goals) M.deleteGoal(id); });
+  M.batch(() => {
+    for (const x of repeatingDays) M.skipOccurrence('task', x.id, x.day);
+    for (const id of whole) M.deleteTask(id);
+    for (const id of goals) M.deleteGoal(id);
+  });
   clearSelection();
-  toast(`Deleted ${tasks.length + goals.length} item${tasks.length + goals.length === 1 ? '' : 's'}`, false, { label: 'Undo', fn: undo });
+  const n = repeatingDays.length + whole.length + goals.length;
+  toast(`Deleted ${n} item${n === 1 ? '' : 's'}`, false, { label: 'Undo', fn: undo });
 }
 
 function selectionMenu(e) {
@@ -985,7 +1006,8 @@ function taskMenu(e, id, day) {
     { label: 'Duplicate', hint: hint('duplicate'), action: () => { M.duplicateTask(id); toast('Duplicated'); } },
     { label: 'Copy', hint: 'Ctrl+C', action: () => { anchor.focus?.(); document.execCommand('copy'); } },
     '-',
-    { label: 'Delete', hint: hint('delete'), danger: true, action: () => deleteWithUndo(t.title, () => M.deleteTask(id)) },
+    ...(t.repeat && t.repeat !== 'none' && day ? [{ label: 'Delete just this day', hint: hint('delete'), danger: true, action: () => skipDay('task', id, day) }] : []),
+    { label: t.repeat && t.repeat !== 'none' ? 'Delete every repeat' : 'Delete', hint: t.repeat && t.repeat !== 'none' && day ? '' : hint('delete'), danger: true, action: () => deleteWithUndo(t.title, () => M.deleteTask(id)) },
   ]);
 }
 
@@ -1083,7 +1105,7 @@ function onClick(e) {
 
   if (item && selectionSize() > 1 && isSelected(item)) { clearSelection(); }
   if (item?.dataset.drag === 'task') { editTask(item, item.dataset.id, item.dataset.day || null); return; }
-  if (item?.dataset.drag === 'note') { if (item.dataset.span) editNoteDetails(item, item.dataset.id); else editNote(item.dataset.id); return; }
+  if (item?.dataset.drag === 'note') { if (item.dataset.span) editNoteDetails(item, item.dataset.id, { day: item.dataset.day }); else editNote(item.dataset.id); return; }
   if (item && /goal$/.test(item.dataset.drag)) { editGoal(item, item.dataset.id); }
 }
 
@@ -1093,6 +1115,12 @@ function editNote(id) {
   closePopover();
   inline = { zone: `editnote:${id}`, value: n.text, focus: true };
   render();
+}
+
+// Remove one appearance of a repeating note or task.
+function skipDay(kind, id, day) {
+  M.skipOccurrence(kind, id, day);
+  toast(`Removed ${parseLocal(day).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })} only`, false, { label: 'Undo', fn: undo });
 }
 
 function noteMenu(e, id, occDay) {
@@ -1106,8 +1134,8 @@ function noteMenu(e, id, occDay) {
   const shift = (days) => () => M.moveNote(id, { toDay: isoDate(addDays(d, days)), fromDay: from });
   openMenu(e, [
     { heading: span ? `Note · ${SHORT(n.date)} – ${SHORT(n.end)}` : rep ? 'Repeating note' : 'Day note' },
-    { label: 'Edit text', hint: span ? '' : 'Enter', action: () => (span ? editNoteDetails(anchor, id) : editNote(id)) },
-    { label: 'Dates and repeat…', hint: span ? 'Enter' : '', action: () => editNoteDetails(anchor, id) },
+    { label: 'Edit text', hint: span ? '' : hint('edit'), action: () => (span ? editNoteDetails(anchor, id, { day: occDay }) : editNote(id)) },
+    { label: 'Dates, repeat and category…', hint: span ? hint('edit') : '', action: () => editNoteDetails(anchor, id, { day: occDay }) },
     ...(span ? [] : [{ label: 'Stretch across days…', action: () => { if (!n.end) M.updateNote(id, { end: isoDate(addDays(parseLocal(n.date), 2)) }); editNoteDetails(anchor, id, { focusEnd: true }); } }]),
     { label: 'Make it a task', action: () => { M.batch(() => { M.addTask({ title: n.text, date: from }); M.deleteNote(id); }); toast('Turned into a task', false, { label: 'Undo', fn: undo }); } },
     '-',
@@ -1118,7 +1146,8 @@ function noteMenu(e, id, occDay) {
     ] },
     { label: 'Copy to next week', disabled: rep, action: () => { M.batch(() => { const c = M.addNote({ date: n.date, end: n.end, text: n.text }); M.moveNote(c.id, { toDay: isoDate(addDays(parseLocal(n.date), 7)) }); }); } },
     '-',
-    { label: rep ? 'Delete (every repeat)' : 'Delete', hint: hint('delete'), danger: true, action: () => deleteWithUndo(n.text, () => M.deleteNote(id)) },
+    ...(rep ? [{ label: 'Delete just this day', hint: hint('delete'), danger: true, action: () => skipDay('note', id, from) }] : []),
+    { label: rep ? 'Delete every repeat' : 'Delete', hint: rep ? '' : hint('delete'), danger: true, action: () => deleteWithUndo(n.text, () => M.deleteNote(id)) },
   ]);
 }
 
@@ -1166,6 +1195,11 @@ function onDblClick(e) {
 }
 
 function onDrop({ kind, id, src, zone, beforeId, el, copy }) {
+  if (kind === 'note' && zone.zone === 'category') {
+    M.updateNote(id, { category: zone.cat });
+    toast(`Tagged ${zone.cat}`, false, { label: 'Undo', fn: undo });
+    return;
+  }
   if (kind === 'note') {
     if (zone.zone !== 'day') return;
     // The day you grabbed a bar by lands on the day you drop it on.
@@ -1318,15 +1352,22 @@ function runAction(id) {
     case 'edit':
       if (multi) return false;
       if (it.kind === 'task') editTask(it.el, it.id, it.day);
-      else if (it.kind === 'note') (it.el.dataset.span ? editNoteDetails(it.el, it.id) : editNote(it.id));
+      else if (it.kind === 'note') (it.el.dataset.span ? editNoteDetails(it.el, it.id, { day: it.day }) : editNote(it.id));
       else if (/goal$/.test(it.kind)) editGoal(it.el, it.id);
       else if (it.kind === 'project') editProject(it.el, it.id);
       return true;
     case 'duplicate': duplicateItems(); return true;
     case 'delete':
       if (multi) bulkDelete();
-      else if (it.kind === 'task') deleteWithUndo(M.findTask(it.id).title, () => M.deleteTask(it.id));
-      else if (it.kind === 'note') deleteWithUndo(M.findNote(it.id).text, () => M.deleteNote(it.id));
+      else if (it.kind === 'task') {
+        const t = M.findTask(it.id);
+        if (t.repeat && t.repeat !== 'none' && it.day) skipDay('task', it.id, it.day);
+        else deleteWithUndo(t.title, () => M.deleteTask(it.id));
+      } else if (it.kind === 'note') {
+        const n = M.findNote(it.id);
+        if (n.repeat && n.repeat !== 'none' && it.day) skipDay('note', it.id, it.day);
+        else deleteWithUndo(n.text, () => M.deleteNote(it.id));
+      }
       else if (/goal$/.test(it.kind)) deleteWithUndo(M.findGoal(it.id).title, () => M.deleteGoal(it.id));
       else return false;
       return true;
@@ -1541,6 +1582,52 @@ export function initPlan() {
     }
   }, true);
   $('planKeys').addEventListener('click', openShortcuts);
+
+  // Hovering (or focusing) a task with a due date lights up that day and says how far away it is.
+  let dueFor = null;
+  let dueTip = null;
+  const clearDue = () => {
+    dueFor = null;
+    root.querySelectorAll('.due-hl').forEach((c) => { c.classList.remove('due-hl'); delete c.dataset.dueLabel; });
+    dueTip?.remove(); dueTip = null;
+  };
+  const showDue = (el) => {
+    if (el === dueFor) return;
+    clearDue();
+    if (document.body.matches('.is-dragging, .is-selecting, .is-stretching, .is-panning')) return;
+    dueFor = el;
+    const due = el.dataset.due;
+    const t = M.findTask(el.dataset.id);
+    const main = scrollEl.getBoundingClientRect();
+    let onScreen = null;
+    root.querySelectorAll(`.day[data-day="${due}"], .mday[data-day="${due}"]`).forEach((c) => {
+      if (!c.offsetParent) return;
+      c.classList.add('due-hl');
+      c.dataset.dueLabel = `Due: ${t?.title || ''}`;
+      const r = c.getBoundingClientRect();
+      if (r.right > main.left + 4 && r.left < main.right - 4) onScreen = c;
+    });
+    const n = daysBetween(startOfDay(new Date()), parseLocal(due));
+    const rel = n === 0 ? 'today' : n === 1 ? 'tomorrow' : n === -1 ? 'yesterday' : n < 0 ? `${-n} days ago` : `in ${n} days`;
+    let text = `⚑ Due ${parseLocal(due).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}, ${rel}`;
+    if (!onScreen && view !== 'list') text += parseLocal(due) > parseLocal(el.dataset.day || todayKey()) ? '  →' : '  ←';
+    dueTip = document.createElement('div');
+    dueTip.className = `due-tip${n < 0 ? ' late' : n <= 2 ? ' soon' : ''}`;
+    dueTip.textContent = text;
+    document.body.appendChild(dueTip);
+    const r = el.getBoundingClientRect();
+    dueTip.style.left = `${Math.min(window.innerWidth - dueTip.offsetWidth - 8, r.left)}px`;
+    dueTip.style.top = `${r.bottom + 6 + dueTip.offsetHeight > window.innerHeight ? r.top - dueTip.offsetHeight - 6 : r.bottom + 6}px`;
+  };
+  root.addEventListener('pointerover', (e) => {
+    const el = e.target.closest?.('[data-due]');
+    if (el) showDue(el); else if (dueFor) clearDue();
+  });
+  root.addEventListener('focusin', (e) => { const el = e.target.closest?.('[data-due]'); if (el) showDue(el); });
+  root.addEventListener('focusout', (e) => { if (e.target === dueFor) clearDue(); });
+  root.addEventListener('pointerleave', clearDue);
+  root.addEventListener('pointerdown', clearDue, true);
+  onChange(() => { if (dueFor && !dueFor.isConnected) clearDue(); });
   document.addEventListener('copy', onCopy);
   document.addEventListener('paste', onPaste);
   // Clicking away from a note being edited saves it.

@@ -8,6 +8,7 @@
 //   "Office hours tue thu 2-4pm"        → two weekdays in a row also mean "repeats"
 //   "Pay rent !!"                       → priority (! · !! · !!!)
 //   "Research paper due nov 20"         → (as a project) due date
+//   "Essay mon due fri"                 → do it Monday, due Friday ("Essay due fri" plans it for Friday)
 //   'Study for "SAT" sat'               → quotes keep a word literal; the second "sat" is Saturday
 //
 // Recognised words are removed from the title. Anything unrecognised stays in the title.
@@ -246,6 +247,7 @@ export function parseQuick(text, { now = new Date(), projects = [], kind = 'task
     // Notes keep their wording; only the when is taken out: a day, a range of days
     // ("dec 18 - jan 12", "nov 23-27", "from mon to wed"), or a repeat ("every tue", "yearly").
     if (kind === 'note') {
+      if (/^#[\w-]+$/.test(tok)) { out.category = tok.slice(1); i++; continue; }
       const SEPS = ['-', '–', 'to', 'through', 'thru', 'till', 'until'];
       // After a start date, look for "- <date>" / "to <date>" / "- 27".
       const rangeEnd = (j) => {
@@ -340,7 +342,8 @@ export function parseQuick(text, { now = new Date(), projects = [], kind = 'task
     if (low === 'due' || low === 'by') {
       const d = tokens[i + 1] ? parseDate(tokens, i + 1, now) : null;
       if (d) {
-        if (kind === 'project') out.due = d.date; else out.date = d.date;
+        // Projects and tasks both get a due date; a task with no other day is planned for its due day.
+        out.due = d.date;
         i += 1 + d.used; continue;
       }
     }
@@ -387,6 +390,7 @@ export function parseQuick(text, { now = new Date(), projects = [], kind = 'task
   while (kind !== 'note' && keep.length && /^(on|at|by|for|due|every|in|from|and)$/i.test(keep[keep.length - 1])) keep.pop();
   out.title = keep.join(' ');
   if (out.title) out.title = out.title[0].toUpperCase() + out.title.slice(1);
+  if (kind === 'task' && out.due && !out.date) out.date = out.due;
   out.dateKey = out.date ? isoDate(out.date) : '';
   out.endKey = out.endDate ? isoDate(out.endDate) : '';
   out.untilKey = out.until ? isoDate(out.until) : '';
