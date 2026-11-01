@@ -233,7 +233,7 @@ function parseRepeat(tokens, i, now) {
  */
 export function parseQuick(text, { now = new Date(), projects = [], kind = 'task' } = {}) {
   const tokens = String(text || '').trim().split(/\s+/).filter(Boolean);
-  const out = { title: '', date: null, time: '', end: '', category: '', repeat: 'none', weekdays: null, priority: 0, project: null, newProject: '', target: 1, due: null, week: false };
+  const out = { title: '', date: null, time: '', end: '', until: null, endDate: null, category: '', repeat: 'none', weekdays: null, priority: 0, project: null, newProject: '', target: 1, due: null, week: false };
   const keep = [];
 
   for (let i = 0; i < tokens.length; ) {
@@ -243,15 +243,76 @@ export function parseQuick(text, { now = new Date(), projects = [], kind = 'task
     // "quoted" words are always kept as typed, e.g. Study for "SAT"
     if (/^".+"$/.test(tok)) { keep.push(tok.slice(1, -1)); i++; continue; }
 
-    // Notes keep their wording; only a date (today, fri, nov 12…) is taken out to say which day.
+    // Notes keep their wording; only the when is taken out: a day, a range of days
+    // ("dec 18 - jan 12", "nov 23-27", "from mon to wed"), or a repeat ("every tue", "yearly").
     if (kind === 'note') {
-      const nd = parseDate(tokens, i, now);
-      if (nd && !out.date) { out.date = nd.date; i += nd.used; continue; }
+      const SEPS = ['-', '–', 'to', 'through', 'thru', 'till', 'until'];
+      // After a start date, look for "- <date>" / "to <date>" / "- 27".
+      const rangeEnd = (j) => {
+        const sep = (tokens[j] || '').toLowerCase();
+        if (!out.date || !SEPS.includes(sep) || !tokens[j + 1]) return j;
+        if (out.repeat !== 'none' && (sep === 'until' || sep === 'till')) {
+          const u = parseDate(tokens, j + 1, now);
+          if (u) { out.until = u.date; return j + 1 + u.used; }
+          return j;
+        }
+        const ed = parseDate(tokens, j + 1, now);
+        let end = ed?.date;
+        let used = ed?.used || 0;
+        const bare = !ed && (tokens[j + 1] || '').match(/^(\d{1,2})(st|nd|rd|th)?$/);
+        if (bare) { end = new Date(out.date.getFullYear(), out.date.getMonth(), +bare[1]); used = 1; }
+        if (!end) return j;
+        while (end < out.date) end = new Date(end.getFullYear() + 1, end.getMonth(), end.getDate());
+        out.endDate = end;
+        return j + 1 + used;
+      };
+      if (low === 'from' && !out.date && tokens[i + 1]) {
+        const fd = parseDate(tokens, i + 1, now);
+        if (fd) { out.date = fd.date; i = rangeEnd(i + 1 + fd.used); continue; }
+      }
+      // "12/1-12/5"
+      const sl = !out.date && low.match(/^(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)[-–](\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)$/);
+      if (sl) {
+        const a = parseDate([sl[1]], 0, now), b = parseDate([sl[2]], 0, now);
+        if (a && b) {
+          out.date = a.date;
+          let end = b.date;
+          while (end < a.date) end = new Date(end.getFullYear() + 1, end.getMonth(), end.getDate());
+          out.endDate = end;
+          i++; continue;
+        }
+      }
+      // "nov 23-27"
+      if (!out.date && monthIndex(low) >= 0) {
+        const m = (tokens[i + 1] || '').match(/^(\d{1,2})[-–](\d{1,2})$/);
+        const a = m && futureDate(now, monthIndex(low), +m[1]);
+        if (a) {
+          out.date = a;
+          let end = new Date(a.getFullYear(), a.getMonth(), +m[2]);
+          if (end < a) end = new Date(a.getFullYear(), a.getMonth() + 1, +m[2]);
+          out.endDate = end;
+          i += 2; continue;
+        }
+      }
+      const nr = parseRepeat(tokens, i, now);
+      if (nr) {
+        out.repeat = nr.repeat;
+        if (nr.weekdays) out.weekdays = nr.weekdays;
+        if (nr.date && !out.date) out.date = nr.date;
+        i = rangeEnd(i + nr.used); continue;
+      }
+      if (!out.date) {
+        const nd = parseDate(tokens, i, now);
+        if (nd) { out.date = nd.date; i = rangeEnd(i + nd.used); continue; }
+      } else if (out.repeat !== 'none' && (low === 'until' || low === 'till')) {
+        const j = rangeEnd(i);
+        if (j !== i) { i = j; continue; }
+      }
       keep.push(tok); i++; continue;
     }
 
     // #category
-    if (/^#[\w-]+$/.test(tok)) { out.category = tok.slice(1).toLowerCase(); i++; continue; }
+    if (/^#[\w-]+$/.test(tok)) { out.category = tok.slice(1); i++; continue; }
 
     // ! · !! · !!! priority (also !low, !med, !high, !1–!3)
     if (/^!{1,3}$/.test(tok)) { out.priority = tok.length; i++; continue; }
@@ -327,6 +388,8 @@ export function parseQuick(text, { now = new Date(), projects = [], kind = 'task
   out.title = keep.join(' ');
   if (out.title) out.title = out.title[0].toUpperCase() + out.title.slice(1);
   out.dateKey = out.date ? isoDate(out.date) : '';
+  out.endKey = out.endDate ? isoDate(out.endDate) : '';
+  out.untilKey = out.until ? isoDate(out.until) : '';
   out.dueKey = out.due ? isoDate(out.due) : '';
   return out;
 }

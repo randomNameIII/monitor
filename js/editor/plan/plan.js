@@ -4,17 +4,18 @@
 
 import { state, onChange, undo, commit } from '../state.js';
 import { esc, isoDate, addDays, parseLocal, weekStartOf, formatTime, formatTimeRange, weekdaysLabel, dayLabel, occurrences, startOfDay, daysBetween } from '../../core/util.js';
-import { notesForDay, goalsForDay, goalsForWeek, isGoalDone, projectProgress, nextProjectTask, byOrder, categoryHue, daysUntil } from '../../core/planning.js';
+import { notesForDay, noteOccurrences, noteLength, goalsForDay, goalsForWeek, isGoalDone, projectProgress, nextProjectTask, byOrder, categoryHue, daysUntil } from '../../core/planning.js';
 import { uid } from '../../core/config.js';
 import * as M from './model.js';
 import { parseQuick } from './parse.js';
-import { enableDrag } from './drag.js';
+import { enableDrag, edgeScroller } from './drag.js';
 import { enableMarquee, paintSelection, clearSelection, toggleSelected, isSelected, selectedItems, selectionSize, setSelection, keyOf, onSelectionChange } from './select.js';
 import { openMenu, closeMenu } from './menu.js';
 import { closePopover } from './popover.js';
-import { editTask, editGoal, editProject, deleteWithUndo } from './editors.js';
+import { editTask, editGoal, editProject, editCategory, editNoteDetails, deleteWithUndo } from './editors.js';
 import { openQuickAdd, setQuickAddHandler, isQuickAddOpen, resolveLine, createParsed, addLines } from './quickadd.js';
 import { cleanLines } from './editors.js';
+import { actionFor, openShortcuts, shortcutsOpen, hint } from './keys.js';
 import { parseICS } from '../ics.js';
 import { toast } from '../ui.js';
 
@@ -54,10 +55,12 @@ const REPEAT_LABEL = { daily: 'Every day', weekly: 'Every week', monthly: 'Every
 /* Rendering                                                              */
 /* ====================================================================== */
 
+const catHue = (c) => categoryHue(c, state.cfg.data.categoryColors);
+
 function edgeHue(t) {
   const p = t.projectId && M.findProject(t.projectId);
   if (p) return p.hue;
-  if (t.category) return categoryHue(t.category);
+  if (t.category) return catHue(t.category);
   return null;
 }
 
@@ -104,20 +107,49 @@ function goalItem(g, kind) {
   </li>`;
 }
 
-// A day note: plain text on a day, no checkbox. Click to edit in place.
-function noteItem(n) {
+// A day note: plain text on a day, no checkbox. Click to edit in place; drag the little handle on
+// its right across days to stretch it into a multi-day note.
+function noteItem(n, day) {
   if (inline?.zone === `editnote:${n.id}`) {
     return `<li class="dnote editing"><input data-inline="editnote:${n.id}" value="${esc(inline.value ?? n.text)}" aria-label="Edit note"></li>`;
   }
-  return `<li class="dnote${flash === n.id ? ' flash' : ''}" tabindex="0" data-drag="note" data-id="${n.id}" title="Day note: click to edit, right-click for options">${esc(n.text)}</li>`;
+  const rep = n.repeat && n.repeat !== 'none';
+  return `<li class="dnote${flash === n.id ? ' flash' : ''}" tabindex="0" data-drag="note" data-id="${n.id}" data-day="${day}" title="Note · click to edit · drag the right edge across days to stretch it · right-click for more">${esc(n.text)}${rep ? ' <span class="n-rep" aria-label="Repeats">↻</span>' : ''}<span class="note-grip" data-grip="end" data-nodrag aria-hidden="true"></span></li>`;
 }
 
+// One-day notes for a day (multi-day notes are drawn as bars instead).
 function notesBlock(key, { placeholder = 'Note for the day, e.g. Essay due' } = {}) {
-  const notes = notesForDay(state.cfg.data.notes, key);
+  const notes = notesForDay(state.cfg.data.notes, key).filter((n) => !n.len);
   const adding = inline?.zone === `note:${key}`;
   if (!notes.length && !adding) return '';
-  return `<ul class="day-notes">${notes.map(noteItem).join('')}${adding ? `<li class="dnote editing"><input data-inline="note:${key}" value="${esc(inline.value || '')}" placeholder="${esc(placeholder)}" aria-label="New note"></li>` : ''}</ul>`;
+  return `<ul class="day-notes">${notes.map((n) => noteItem(n, key)).join('')}${adding ? `<li class="dnote editing"><input data-inline="note:${key}" value="${esc(inline.value || '')}" placeholder="${esc(placeholder)}" aria-label="New note"></li>` : ''}</ul>`;
 }
+
+// Pack multi-day notes into lanes so overlapping ones stack. items: [{ s, e, ... }] (column indexes)
+function packLanes(items) {
+  const ends = [];
+  for (const it of items) {
+    let lane = ends.findIndex((end) => end < it.s);
+    if (lane === -1) { lane = ends.length; ends.push(it.e); } else ends[lane] = it.e;
+    it.lane = lane;
+  }
+  return ends.length;
+}
+
+const SHORT = (k) => parseLocal(k).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
+function spanBar(o, { s, e, lane, contL, contR, style }) {
+  const rep = o.note.repeat && o.note.repeat !== 'none';
+  return `<div class="span-bar${contL ? ' cont-l' : ''}${contR ? ' cont-r' : ''}${flash === o.note.id ? ' flash' : ''}" tabindex="0"
+      data-drag="note" data-id="${o.note.id}" data-day="${o.start}" data-span="1" data-lane="${lane}" data-s="${s}" data-e="${e}" style="${style}"
+      title="${esc(o.note.text)} · ${SHORT(o.start)} – ${SHORT(o.end)} · drag to move, drag an end to change the dates">
+      ${contL ? '' : '<span class="span-h l" data-grip="start" data-nodrag aria-hidden="true"></span>'}
+      <span class="span-text">${esc(o.note.text)}</span><span class="span-dates">${SHORT(o.start)} – ${SHORT(o.end)}${rep ? ' ↻' : ''}</span>
+      ${contR ? '' : '<span class="span-h r" data-grip="end" data-nodrag aria-hidden="true"></span>'}
+    </div>`;
+}
+
+const BAR_H = 26;
 
 function inlineBox(zone, placeholder) {
   if (inline?.zone !== zone) return '';
@@ -162,6 +194,15 @@ function renderTimeline() {
   const byDay = new Map();
   for (const o of occ) (byDay.get(o.day) || byDay.set(o.day, []).get(o.day)).push(o);
   let days = '';
+  // Multi-day notes become bars across the columns.
+  const spans = noteOccurrences(state.cfg.data.notes, rangeStart, n).filter((o) => o.len).map((o) => ({
+    o, s: Math.max(0, indexOf(o.start)), e: Math.min(n - 1, indexOf(o.end)),
+    contL: indexOf(o.start) < 0, contR: indexOf(o.end) > n - 1,
+  }));
+  packLanes(spans);
+  const laneDepth = new Array(n).fill(0);
+  for (const sp of spans) for (let k = sp.s; k <= sp.e; k++) laneDepth[k] = Math.max(laneDepth[k], sp.lane + 1);
+
   for (let i = 0; i < n; i++) {
     const d = addDays(rangeStart, i);
     const key = isoDate(d);
@@ -177,6 +218,7 @@ function renderTimeline() {
         <span class="dspace"></span>
         ${goals.length ? `<span class="dgoals${gDone === goals.length ? ' all' : ''}" title="Daily goals done">${gDone}/${goals.length}</span>` : ''}
       </header>
+      ${laneDepth[i] ? `<div class="span-space" style="height:${laneDepth[i] * BAR_H}px"></div>` : ''}
       ${notesBlock(key)}
       ${goals.length || inline?.zone === `dgoal:${key}` ? `<ul class="goal-list day-goals">${goals.map((g) => goalItem(g, 'day-goal')).join('')}</ul>${inlineBox(`dgoal:${key}`, 'Goal for the day')}` : ''}
       <ol class="tasks">${items.map((t) => taskCard(t, { day: key })).join('')}</ol>
@@ -190,7 +232,10 @@ function renderTimeline() {
   }
   weekEl.style.setProperty('--colw', `${colW}px`);
   weekEl.style.setProperty('--days', n);
-  weekEl.innerHTML = days;
+  const bars = spans.map((sp) => spanBar(sp.o, { ...sp, style: `left:${sp.s * colW + 6}px;width:${(sp.e - sp.s + 1) * colW - 12}px;top:calc(var(--head-h, 46px) + ${sp.lane * BAR_H}px)` })).join('');
+  weekEl.innerHTML = days + (bars ? `<div class="span-layer">${bars}</div>` : '');
+  const head = weekEl.querySelector('.day-head');
+  if (head) weekEl.style.setProperty('--head-h', `${head.offsetHeight + 4}px`);
 }
 
 /* ----------------------------- month view ----------------------------- */
@@ -224,6 +269,22 @@ function renderMonth() {
 
   let head = '';
   for (let i = 0; i < 7; i++) head += `<div class="mhead">${addDays(gridStart, i).toLocaleDateString(undefined, { weekday: 'short' })}</div>`;
+  // Multi-day notes: one bar per week row they cross.
+  const occs = noteOccurrences(state.cfg.data.notes, gridStart, weeks * 7).filter((o) => o.len);
+  const mbars = [];
+  const depth = new Array(weeks * 7).fill(0);
+  for (let w = 0; w < weeks; w++) {
+    const row = [];
+    for (const o of occs) {
+      const a = daysBetween(gridStart, parseLocal(o.start)), z = daysBetween(gridStart, parseLocal(o.end));
+      if (z < w * 7 || a > w * 7 + 6) continue;
+      row.push({ o, w, s: Math.max(a, w * 7) - w * 7, e: Math.min(z, w * 7 + 6) - w * 7, contL: a < w * 7, contR: z > w * 7 + 6 });
+    }
+    packLanes(row);
+    for (const sp of row) for (let k = sp.s; k <= sp.e; k++) depth[w * 7 + k] = Math.max(depth[w * 7 + k], sp.lane + 1);
+    mbars.push(...row);
+  }
+
   let cells = '';
   for (let i = 0; i < weeks * 7; i++) {
     const d = addDays(gridStart, i);
@@ -237,6 +298,7 @@ function renderMonth() {
         <button type="button" class="mnum" data-act="open-day" data-day="${key}" title="Open this day">${d.getDate() === 1 ? d.toLocaleDateString(undefined, { month: 'short' }) + ' ' : ''}${d.getDate()}</button>
         ${goals.length ? `<span class="dgoals${gDone === goals.length ? ' all' : ''}" title="Goals for the day">${gDone}/${goals.length}</span>` : ''}
       </header>
+      ${depth[i] ? `<div class="span-space" style="height:${depth[i] * 20}px"></div>` : ''}
       ${notesBlock(key, { placeholder: 'Note' })}
       <ol class="tasks">${items.map((t) => miniTask(t, key)).join('')}</ol>
       <button type="button" class="mmore" data-act="open-day" data-day="${key}" hidden></button>
@@ -244,12 +306,28 @@ function renderMonth() {
     </section>`;
   }
   monthEl.style.setProperty('--weeks', weeks);
-  monthEl.innerHTML = `<div class="mgrid">${head}${cells}</div>`;
+  monthSpans = mbars;
+  monthEl.innerHTML = `<div class="mgrid">${head}${cells}<div class="span-layer">${mbars.map((sp) => spanBar(sp.o, { ...sp, style: '' })).join('')}</div></div>`;
   requestAnimationFrame(collapseMonth);
+}
+
+let monthSpans = [];
+// Place the month's note bars over the cells they cover (needs the laid-out cell positions).
+function layoutMonthSpans() {
+  const cells = monthEl.querySelectorAll('.mday');
+  const bars = monthEl.querySelectorAll('.span-layer .span-bar');
+  bars.forEach((bar, k) => {
+    const sp = monthSpans[k];
+    const a = cells[sp.w * 7 + sp.s], z = cells[sp.w * 7 + sp.e];
+    if (!a || !z) return;
+    const headH = a.querySelector('.mday-head').offsetHeight + 6;
+    Object.assign(bar.style, { left: `${a.offsetLeft + 4}px`, top: `${a.offsetTop + headH + sp.lane * 20}px`, width: `${z.offsetLeft + z.offsetWidth - a.offsetLeft - 8}px` });
+  });
 }
 
 // Hide what doesn't fit in each day and say how many more there are.
 function collapseMonth() {
+  layoutMonthSpans();
   for (const cell of monthEl.querySelectorAll('.mday')) {
     const list = cell.querySelector('.tasks');
     const more = cell.querySelector('.mmore');
@@ -437,6 +515,17 @@ function renderSide() {
     ${archivedCount ? `<button type="button" class="link small-link" data-act="toggle-archived">${showArchived ? 'Hide' : 'Show'} archived (${archivedCount})</button>` : ''}
   </section>`;
 
+  // Categories: colors and names. Drop a task on one to set its category.
+  const cats = M.allCategories();
+  const counts = new Map();
+  for (const t of ev()) if (t.category) counts.set(t.category, (counts.get(t.category) || 0) + 1);
+  const catBlock = `<section class="side-block cats-block">
+    <header><h2>Categories</h2></header>
+    ${cats.length ? `<ul class="cat-list">${cats.map((c) => `<li><button type="button" class="cat-chip" data-act="cat-edit" data-cat="${esc(c)}" data-drop data-accept="task" data-zone="category" style="--h:${catHue(c)}" title="Change color or rename · drop tasks here to tag them">
+      <i></i><span>${esc(c)}</span><b>${counts.get(c) || 0}</b></button></li>`).join('')}</ul>`
+      : '<p class="side-hint">Type #name when adding a task (like #ENG111) to give it a category. Its color shows on the task’s edge, here and on the wall.</p>'}
+  </section>`;
+
   // Inbox
   const inbox = ev().filter((t) => !t.date && !t.projectId).sort(byOrder);
   html += `<section class="side-block inbox" data-drop data-accept="task" data-zone="inbox">
@@ -447,7 +536,7 @@ function renderSide() {
     ${!inbox.length && inline?.zone !== 'inbox' ? '<p class="side-hint">Tasks without a date land here. Drag them onto a day when you know when.</p>' : ''}
   </section>`;
 
-  sideEl.innerHTML = html;
+  sideEl.innerHTML = html + catBlock;
 }
 
 function projectCard(p) {
@@ -691,15 +780,15 @@ function selectionMenu(e) {
   const tasks = selTasks().length;
   openMenu(e, [
     { heading: `${n} selected` },
-    { label: 'Mark done / not done', hint: 'Space', action: bulkDone },
+    { label: 'Mark done / not done', hint: hint('done'), action: bulkDone },
     '-',
     { label: 'Move to', items: [
       { label: 'Today', action: () => bulkMoveTo(isoDate(today)) },
       { label: 'Tomorrow', action: () => bulkMoveTo(isoDate(addDays(today, 1))) },
       { label: 'Next week', action: () => bulkMoveTo(isoDate(weekStartOf(addDays(today, 7), ws()))) },
       '-',
-      { label: 'One day later', hint: 'Alt+→', action: () => bulkShift(1) },
-      { label: 'One day earlier', hint: 'Alt+←', action: () => bulkShift(-1) },
+      { label: 'One day later', hint: hint('later'), action: () => bulkShift(1) },
+      { label: 'One day earlier', hint: hint('earlier'), action: () => bulkShift(-1) },
       { label: 'One week later', action: () => bulkShift(7) },
       '-',
       { label: 'Inbox (no date)', disabled: !tasks, action: () => bulkUnschedule() },
@@ -710,13 +799,14 @@ function selectionMenu(e) {
     ] },
     { label: 'Category', disabled: !tasks, items: [
       { label: 'None', action: () => bulkSet({ category: '' }) },
-      ...cats.map((c) => ({ label: c, swatch: categoryHue(c), action: () => bulkSet({ category: c }) })),
+      ...cats.map((c) => ({ label: c, swatch: catHue(c), action: () => bulkSet({ category: c }) })),
     ] },
     { label: 'Priority', disabled: !tasks, items: [[0, 'None'], [1, '!  Priority'], [2, '!!  High'], [3, '!!!  Urgent']].map(([v, l]) => ({ label: l, action: () => bulkSet({ priority: v }) })) },
     { label: 'Copy', hint: 'Ctrl+C', disabled: !tasks, action: () => document.execCommand('copy') },
     '-',
     { label: 'Clear selection', hint: 'Esc', action: () => { clearSelection(); } },
-    { label: `Delete ${n}`, hint: 'Del', danger: true, action: bulkDelete },
+    { label: `Duplicate ${n}`, hint: hint('duplicate'), action: duplicateItems },
+    { label: `Delete ${n}`, hint: hint('delete'), danger: true, action: bulkDelete },
   ]);
 }
 
@@ -869,14 +959,14 @@ function taskMenu(e, id, day) {
   const move = (dk) => () => { M.moveTask(id, dk, { fromDay: day || t.date || null }); if (dk) toast(`Moved to ${dayLabel(parseLocal(dk))}`, false, { label: 'Undo', fn: undo }); };
   const cats = [...new Set(ev().map((x) => x.category).filter(Boolean))].sort();
   openMenu(e, [
-    { label: done ? 'Mark not done' : 'Mark done', hint: 'Space', action: () => M.toggleTask(id, day || t.date) },
-    { label: 'Edit details…', hint: 'Enter', action: () => editTask(anchor, id, day) },
+    { label: done ? 'Mark not done' : 'Mark done', hint: hint('done'), action: () => M.toggleTask(id, day || t.date) },
+    { label: 'Edit details…', hint: hint('edit'), action: () => editTask(anchor, id, day) },
     '-',
     { label: 'Move to', items: [
       { label: 'Today', action: move(isoDate(today)) },
       { label: 'Tomorrow', action: move(isoDate(addDays(today, 1))) },
       { label: 'Next week', action: move(isoDate(weekStartOf(addDays(today, 7), ws()))) },
-      { label: day ? 'One day later' : 'Start of the week on screen', hint: day ? 'Alt+→' : '', action: move(day ? isoDate(addDays(parseLocal(day), 1)) : isoDate(focusWeek)) },
+      { label: day ? 'One day later' : 'Start of the week on screen', hint: day ? hint('later') : '', action: move(day ? isoDate(addDays(parseLocal(day), 1)) : isoDate(focusWeek)) },
       '-',
       { label: 'Inbox (no date)', action: () => M.moveTask(id, ''), disabled: !t.date },
     ] },
@@ -888,14 +978,14 @@ function taskMenu(e, id, day) {
     ] },
     { label: 'Category', items: [
       { label: 'None', checked: !t.category, action: () => M.updateTask(id, { category: '' }) },
-      ...cats.map((c) => ({ label: c, swatch: categoryHue(c), checked: c === t.category, action: () => M.updateTask(id, { category: c }) })),
+      ...cats.map((c) => ({ label: c, swatch: catHue(c), checked: c === t.category, action: () => M.updateTask(id, { category: c }) })),
       ...(cats.length ? [] : [{ label: 'Type #name when adding a task', disabled: true }]),
     ] },
     { label: 'Priority', items: [[0, 'None'], [1, '!  Priority'], [2, '!!  High'], [3, '!!!  Urgent']].map(([v, l]) => ({ label: l, checked: (t.priority || 0) === v, hint: v ? String(v) : '0', action: () => M.updateTask(id, { priority: v }) })) },
-    { label: 'Duplicate', action: () => { M.duplicateTask(id); toast('Duplicated'); } },
+    { label: 'Duplicate', hint: hint('duplicate'), action: () => { M.duplicateTask(id); toast('Duplicated'); } },
     { label: 'Copy', hint: 'Ctrl+C', action: () => { anchor.focus?.(); document.execCommand('copy'); } },
     '-',
-    { label: 'Delete', hint: 'Del', danger: true, action: () => deleteWithUndo(t.title, () => M.deleteTask(id)) },
+    { label: 'Delete', hint: hint('delete'), danger: true, action: () => deleteWithUndo(t.title, () => M.deleteTask(id)) },
   ]);
 }
 
@@ -906,7 +996,7 @@ function goalMenu(e, id) {
   const counter = (g.target || 1) > 1;
   const items = counter
     ? [{ label: 'Add one', action: () => M.bumpGoal(id, 1), disabled: isGoalDone(g) }, { label: 'Remove one', action: () => M.bumpGoal(id, -1), disabled: !g.count }]
-    : [{ label: isGoalDone(g) ? 'Mark not done' : 'Mark done', hint: 'Space', action: () => M.bumpGoal(id) }];
+    : [{ label: isGoalDone(g) ? 'Mark not done' : 'Mark done', hint: hint('done'), action: () => M.bumpGoal(id) }];
   const moves = g.scope === 'day'
     ? [{ label: 'Tomorrow', action: () => M.moveGoal(id, { date: isoDate(addDays(parseLocal(g.date), 1)) }) },
        { label: 'Make it a week goal', action: () => M.moveGoal(id, { scope: 'week', date: isoDate(weekStartOf(parseLocal(g.date), ws())) }) }]
@@ -914,11 +1004,11 @@ function goalMenu(e, id) {
        { label: 'Make it a goal for today', action: () => M.moveGoal(id, { scope: 'day', date: todayKey() }) }];
   openMenu(e, [
     ...items,
-    { label: 'Edit…', hint: 'Enter', action: () => editGoal(anchor, id) },
+    { label: 'Edit…', hint: hint('edit'), action: () => editGoal(anchor, id) },
     '-',
     { label: 'Move to', items: moves },
     '-',
-    { label: 'Delete', hint: 'Del', danger: true, action: () => deleteWithUndo(g.title, () => M.deleteGoal(id)) },
+    { label: 'Delete', hint: hint('delete'), danger: true, action: () => deleteWithUndo(g.title, () => M.deleteGoal(id)) },
   ]);
 }
 
@@ -929,7 +1019,7 @@ function projectMenu(e, id) {
   openMenu(e, [
     { label: 'Add task…', action: () => { expanded.add(id); openInline(`project:${id}`); } },
     { label: expanded.has(id) ? 'Collapse' : 'Show tasks', action: () => { expanded.has(id) ? expanded.delete(id) : expanded.add(id); render(); } },
-    { label: 'Edit details…', hint: 'Enter', action: () => editProject(anchor, id) },
+    { label: 'Edit details…', hint: hint('edit'), action: () => editProject(anchor, id) },
     { label: 'Color', items: [220, 190, 160, 100, 45, 25, 340, 280].map((h) => ({ label: ' ', swatch: h, checked: p.hue === h, action: () => M.updateProject(id, { hue: h }) })) },
     '-',
     { label: p.archived ? 'Unarchive' : 'Archive', action: () => M.updateProject(id, { archived: !p.archived }) },
@@ -972,6 +1062,7 @@ function onClick(e) {
     return;
   }
   if (a === 'open-day') { openDay(act.dataset.day); return; }
+  if (a === 'cat-edit') { editCategory(act, act.dataset.cat, catHue); return; }
   if (a === 'sel-clear') { clearSelection(); return; }
   if (a === 'sel-menu') { const r = act.getBoundingClientRect(); selectionMenu({ preventDefault() {}, target: act, clientX: r.left, clientY: r.bottom + 6, detail: e.detail }); return; }
   if (a === 'sel-done') { bulkDone(); return; }
@@ -992,7 +1083,7 @@ function onClick(e) {
 
   if (item && selectionSize() > 1 && isSelected(item)) { clearSelection(); }
   if (item?.dataset.drag === 'task') { editTask(item, item.dataset.id, item.dataset.day || null); return; }
-  if (item?.dataset.drag === 'note') { editNote(item.dataset.id); return; }
+  if (item?.dataset.drag === 'note') { if (item.dataset.span) editNoteDetails(item, item.dataset.id); else editNote(item.dataset.id); return; }
   if (item && /goal$/.test(item.dataset.drag)) { editGoal(item, item.dataset.id); }
 }
 
@@ -1004,23 +1095,30 @@ function editNote(id) {
   render();
 }
 
-function noteMenu(e, id) {
+function noteMenu(e, id, occDay) {
   const n = M.findNote(id);
   if (!n) return;
-  const d = parseLocal(n.date);
+  const anchor = e.target.closest?.('[data-id]') || e.target;
+  const from = occDay || n.date;
+  const d = parseLocal(from);
+  const span = noteLength(n) > 0;
+  const rep = n.repeat && n.repeat !== 'none';
+  const shift = (days) => () => M.moveNote(id, { toDay: isoDate(addDays(d, days)), fromDay: from });
   openMenu(e, [
-    { heading: 'Day note' },
-    { label: 'Edit', hint: 'Enter', action: () => editNote(id) },
-    { label: 'Make it a task', action: () => { M.batch(() => { M.addTask({ title: n.text, date: n.date }); M.deleteNote(id); }); toast('Turned into a task', false, { label: 'Undo', fn: undo }); } },
+    { heading: span ? `Note · ${SHORT(n.date)} – ${SHORT(n.end)}` : rep ? 'Repeating note' : 'Day note' },
+    { label: 'Edit text', hint: span ? '' : 'Enter', action: () => (span ? editNoteDetails(anchor, id) : editNote(id)) },
+    { label: 'Dates and repeat…', hint: span ? 'Enter' : '', action: () => editNoteDetails(anchor, id) },
+    ...(span ? [] : [{ label: 'Stretch across days…', action: () => { if (!n.end) M.updateNote(id, { end: isoDate(addDays(parseLocal(n.date), 2)) }); editNoteDetails(anchor, id, { focusEnd: true }); } }]),
+    { label: 'Make it a task', action: () => { M.batch(() => { M.addTask({ title: n.text, date: from }); M.deleteNote(id); }); toast('Turned into a task', false, { label: 'Undo', fn: undo }); } },
     '-',
-    { label: 'Move to', items: [
-      { label: 'Day before', action: () => M.moveNote(id, { date: isoDate(addDays(d, -1)) }) },
-      { label: 'Next day', action: () => M.moveNote(id, { date: isoDate(addDays(d, 1)) }) },
-      { label: 'Same day next week', action: () => M.moveNote(id, { date: isoDate(addDays(d, 7)) }) },
+    { label: 'Move', items: [
+      { label: 'A day earlier', action: shift(-1) },
+      { label: 'A day later', action: shift(1) },
+      { label: 'A week later', action: shift(7) },
     ] },
-    { label: 'Copy to next week', action: () => M.addNote({ date: isoDate(addDays(d, 7)), text: n.text }) },
+    { label: 'Copy to next week', disabled: rep, action: () => { M.batch(() => { const c = M.addNote({ date: n.date, end: n.end, text: n.text }); M.moveNote(c.id, { toDay: isoDate(addDays(parseLocal(n.date), 7)) }); }); } },
     '-',
-    { label: 'Delete', hint: 'Del', danger: true, action: () => deleteWithUndo(n.text, () => M.deleteNote(id)) },
+    { label: rep ? 'Delete (every repeat)' : 'Delete', hint: hint('delete'), danger: true, action: () => deleteWithUndo(n.text, () => M.deleteNote(id)) },
   ]);
 }
 
@@ -1037,7 +1135,18 @@ function onContext(e) {
     return goalMenu(e, item.dataset.id);
   }
   if (item?.dataset.drag === 'project') return projectMenu(e, item.dataset.id);
-  if (item?.dataset.drag === 'note') return noteMenu(e, item.dataset.id);
+  if (item?.dataset.drag === 'note') return noteMenu(e, item.dataset.id, item.dataset.day);
+  const chip = e.target.closest('.cat-chip');
+  if (chip) {
+    const c = chip.dataset.cat;
+    return openMenu(e, [
+      { heading: c },
+      { label: 'Color and name…', action: () => editCategory(chip, c, catHue) },
+      { label: 'Select its tasks on screen', action: () => setSelection([...root.querySelectorAll('[data-drag="task"]')].filter((x) => (M.findTask(x.dataset.id)?.category || '') === c).map(keyOf)) },
+      '-',
+      { label: 'Remove category', danger: true, action: () => deleteWithUndo(c, () => M.deleteCategory(c)) },
+    ]);
+  }
   if (day) return dayMenu(e, day.dataset.day);
   const zone = e.target.closest('[data-zone]')?.dataset.zone;
   if (zone === 'inbox') return openMenu(e, [{ label: 'Add task to inbox', action: () => openInline('inbox') }]);
@@ -1059,8 +1168,12 @@ function onDblClick(e) {
 function onDrop({ kind, id, src, zone, beforeId, el, copy }) {
   if (kind === 'note') {
     if (zone.zone !== 'day') return;
-    if (copy) { const n = M.findNote(id); if (n) M.addNote({ date: zone.day, text: n.text }); }
-    else M.moveNote(id, { date: zone.day, beforeId });
+    // The day you grabbed a bar by lands on the day you drop it on.
+    const fromDay = src.grab || src.day || null;
+    if (copy) {
+      const n = M.findNote(id);
+      if (n) M.batch(() => { const c = M.addNote({ date: n.date, end: n.end, text: n.text, repeat: n.repeat, weekdays: n.weekdays, until: n.until }); M.moveNote(c.id, { toDay: zone.day, fromDay: fromDay || n.date }); });
+    } else M.moveNote(id, { toDay: zone.day, fromDay, beforeId });
     return;
   }
   // Alt held while dropping: leave the originals and drop copies.
@@ -1090,6 +1203,12 @@ function onDrop({ kind, id, src, zone, beforeId, el, copy }) {
     else if (zone.zone === 'project') { bulkSet({ projectId: zone.project }); expanded.add(zone.project); }
     return;
   }
+  if (kind === 'task' && zone.zone === 'category') {
+    if (selectionSize() > 1 && el && isSelected(el)) bulkSet({ category: zone.cat });
+    else M.updateTask(id, { category: zone.cat });
+    toast(`Tagged ${zone.cat}`, false, { label: 'Undo', fn: undo });
+    return;
+  }
   if (kind === 'task') {
     const t = M.findTask(id);
     if (zone.zone === 'day') {
@@ -1113,94 +1232,215 @@ function onDrop({ kind, id, src, zone, beforeId, el, copy }) {
   }
 }
 
-function onKey(e) {
-  const inField = e.target.closest?.('input, textarea, select, [contenteditable="true"]');
-  const mod = e.ctrlKey || e.metaKey;
+// The focused item (or null) as { el, id, kind, day }.
+function focusedItem() {
+  const el = document.activeElement?.closest?.('[data-id]');
+  return el && root.contains(el) ? { el, id: el.dataset.id, kind: el.dataset.drag, day: el.dataset.day || null } : null;
+}
 
-  // Quick add works from any tab.
-  if (!inField && !isQuickAddOpen() && ((e.key === 'n' || e.key === 'N') && !mod && !e.altKey || (mod && e.key.toLowerCase() === 'k'))) {
-    if (document.querySelector('.pop, .ctx-root')) return;
+// Copies of the selection (or the focused item) on the same days.
+function duplicateItems() {
+  const multi = selectionSize() > 1;
+  const it = focusedItem();
+  M.batch(() => {
+    if (multi) {
+      const made = M.pasteTasks(selTasks().map((x) => ({ task: M.findTask(x.id), day: x.day })).filter((x) => x.task), null);
+      for (const x of selGoals()) { const g = M.findGoal(x.id); M.addGoal({ scope: g.scope, date: g.date, title: g.title, target: g.target || 1 }); }
+      setSelection(made.map((t) => `t:${t.id}:${t.date}`));
+    } else if (it?.kind === 'task') {
+      flash = M.duplicateTask(it.id)?.id || null;
+    } else if (it?.kind === 'note') {
+      const n = M.findNote(it.id);
+      flash = M.addNote({ date: n.date, end: n.end, text: n.text, repeat: n.repeat, weekdays: n.weekdays, until: n.until })?.id || null;
+    } else if (it && /goal$/.test(it.kind)) {
+      const g = M.findGoal(it.id);
+      flash = M.addGoal({ scope: g.scope, date: g.date, title: g.title, target: g.target || 1 })?.id || null;
+    }
+  });
+  toast('Duplicated', false, { label: 'Undo', fn: undo });
+}
+
+// Move the selection or focused item by `days` (tasks, notes and day goals).
+function shiftItems(days) {
+  if (selectionSize() > 1) { bulkShift(days); return; }
+  const it = focusedItem();
+  if (!it) return;
+  if (it.kind === 'task' && it.day) {
+    const to = isoDate(addDays(parseLocal(it.day), days));
+    M.moveTask(it.id, to, { fromDay: it.day });
+    if (view === 'days') { ensureRange(to); if (!isDayVisible(to)) goDays(days > 0 ? Math.min(days, 7) : Math.max(days, -7)); }
+    [...root.querySelectorAll(`[data-id="${it.id}"]`)].find((x) => x.dataset.day === to)?.focus({ preventScroll: true });
+  } else if (it.kind === 'note') {
+    const from = it.day || M.findNote(it.id).date;
+    M.moveNote(it.id, { toDay: isoDate(addDays(parseLocal(from), days)), fromDay: from });
+  } else if (it.kind === 'day-goal') {
+    const g = M.findGoal(it.id);
+    M.moveGoal(it.id, { date: isoDate(addDays(parseLocal(g.date), days)) });
+  }
+}
+
+function moveItemsTo(dayKey) {
+  if (selectionSize() > 1) { dayKey ? bulkMoveTo(dayKey) : bulkUnschedule(); return; }
+  const it = focusedItem();
+  if (it?.kind === 'task') M.moveTask(it.id, dayKey, { fromDay: it.day });
+  else if (it?.kind === 'note' && dayKey) M.moveNote(it.id, { toDay: dayKey, fromDay: it.day || M.findNote(it.id).date });
+}
+
+const VIEWS = ['days', 'month', 'list'];
+
+// What each bindable action does. Returns false if it didn't apply (so the key does its normal thing).
+function runAction(id) {
+  const it = focusedItem();
+  const multi = selectionSize() > 1;
+  const today = startOfDay(new Date());
+  switch (id) {
+    case 'today': goToday(); return true;
+    case 'back': if (view === 'list') return false; view === 'month' ? goMonth(-1) : goDays(-1); return true;
+    case 'forward': if (view === 'list') return false; view === 'month' ? goMonth(1) : goDays(1); return true;
+    case 'backWeek': if (view !== 'days') return false; goDays(-7); return true;
+    case 'forwardWeek': if (view !== 'days') return false; goDays(7); return true;
+    case 'cycleView': setView(VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length]); return true;
+    case 'viewDays': setView('days'); return true;
+    case 'viewMonth': setView('month'); return true;
+    case 'viewList': setView('list'); return true;
+    case 'selectAll': if (view === 'list') return false; selectVisible(); return true;
+    case 'shortcuts': openShortcuts(); return true;
+  }
+  if (!multi && !it) return false;
+  switch (id) {
+    case 'done':
+      if (multi) bulkDone();
+      else if (it.kind === 'task') M.toggleTask(it.id, it.day);
+      else if (/goal$/.test(it.kind)) M.bumpGoal(it.id, 1);
+      else if (it.kind === 'project') { expanded.has(it.id) ? expanded.delete(it.id) : expanded.add(it.id); render(); }
+      else return false;
+      return true;
+    case 'edit':
+      if (multi) return false;
+      if (it.kind === 'task') editTask(it.el, it.id, it.day);
+      else if (it.kind === 'note') (it.el.dataset.span ? editNoteDetails(it.el, it.id) : editNote(it.id));
+      else if (/goal$/.test(it.kind)) editGoal(it.el, it.id);
+      else if (it.kind === 'project') editProject(it.el, it.id);
+      return true;
+    case 'duplicate': duplicateItems(); return true;
+    case 'delete':
+      if (multi) bulkDelete();
+      else if (it.kind === 'task') deleteWithUndo(M.findTask(it.id).title, () => M.deleteTask(it.id));
+      else if (it.kind === 'note') deleteWithUndo(M.findNote(it.id).text, () => M.deleteNote(it.id));
+      else if (/goal$/.test(it.kind)) deleteWithUndo(M.findGoal(it.id).title, () => M.deleteGoal(it.id));
+      else return false;
+      return true;
+    case 'later': shiftItems(1); return true;
+    case 'earlier': shiftItems(-1); return true;
+    case 'weekLater': shiftItems(7); return true;
+    case 'tomorrow': moveItemsTo(isoDate(addDays(today, 1))); return true;
+    case 'inbox': moveItemsTo(''); return true;
+    case 'p0': case 'p1': case 'p2': case 'p3': {
+      const v = +id[1];
+      if (multi) bulkSet({ priority: v });
+      else if (it.kind === 'task') M.updateTask(it.id, { priority: v });
+      else return false;
+      return true;
+    }
+    case 'menu': {
+      if (multi) {
+        const r = $('selBar').getBoundingClientRect();
+        selectionMenu({ preventDefault() {}, target: $('selBar'), clientX: r.left, clientY: r.top - 8, type: 'keydown' });
+      } else {
+        const r = it.el.getBoundingClientRect();
+        it.el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: r.left + 20, clientY: r.bottom - 4 }));
+      }
+      return true;
+    }
+    default: return false;
+  }
+}
+
+function onKey(e) {
+  if (shortcutsOpen()) return;
+  const inField = e.target.closest?.('input, textarea, select, [contenteditable="true"]');
+  const overlay = document.querySelector('.pop, .ctx-root, .qa-backdrop');
+  const mod = e.ctrlKey || e.metaKey;
+  const action = inField ? null : actionFor(e);
+
+  // Quick add works from any tab (Ctrl/Cmd+K always does).
+  const quick = { quickAdd: {}, quickNote: { kind: 'note' }, quickGoal: { kind: 'day-goal' }, quickProject: { kind: 'project' } }[action]
+    || (!inField && mod && e.key.toLowerCase() === 'k' ? {} : null);
+  if (quick && !isQuickAddOpen() && !overlay) {
     e.preventDefault();
     const focusedDay = visible() ? document.activeElement?.closest?.('[data-zone="day"]')?.dataset.day : null;
-    openQuickAdd({ day: focusedDay || undefined, week: visible() ? isoDate(focusWeek) : undefined });
+    openQuickAdd({ ...quick, day: focusedDay || undefined, week: visible() ? isoDate(focusWeek) : undefined });
     return;
   }
-  if (!visible() || inField || document.querySelector('.pop, .ctx-root, .qa-backdrop')) return;
-  if (mod && e.key.toLowerCase() === 'a' && view !== 'list') { e.preventDefault(); selectVisible(); return; }
-  if (mod) return;
-
-  // Keys for a multi-selection.
-  if (selectionSize() > 1) {
-    if (e.key === 'Escape') { e.preventDefault(); clearSelection(); return; }
-    if (e.key === ' ' || e.key === 'x') { e.preventDefault(); bulkDone(); return; }
-    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); bulkDelete(); return; }
-    if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); bulkShift(e.key === 'ArrowRight' ? 1 : -1); return; }
-    if (/^[0-3]$/.test(e.key)) { e.preventDefault(); bulkSet({ priority: +e.key }); return; }
-    if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
-      e.preventDefault();
-      const r = $('selBar').getBoundingClientRect();
-      selectionMenu({ preventDefault() {}, target: $('selBar'), clientX: r.left, clientY: r.top - 8, type: 'keydown' });
-      return;
-    }
-  }
+  if (!visible() || inField || overlay) return;
   if (e.key === 'Escape' && selectionSize()) { clearSelection(); return; }
+  if (action && runAction(action)) { e.preventDefault(); }
+}
 
-  const item = document.activeElement?.closest?.('[data-id]');
-  if (item && root.contains(item)) {
-    const id = item.dataset.id;
-    const kind = item.dataset.drag;
-    if (e.key === ' ' || e.key === 'x') {
-      e.preventDefault();
-      if (kind === 'task') M.toggleTask(id, item.dataset.day || null);
-      else if (/goal$/.test(kind)) M.bumpGoal(id, 1);
-      else if (kind === 'project') { expanded.has(id) ? expanded.delete(id) : expanded.add(id); render(); }
-      return;
+/* ----------------------------- stretching notes ----------------------------- */
+
+const dayUnder = (x, y) => document.elementsFromPoint(x, y).find((el) => el.matches?.('[data-zone="day"]'))?.dataset.day || null;
+
+// Drag a note's end (or a bar's start) across days. `occStart` is the appearance being stretched,
+// so repeating notes change for every repeat. Live preview, one undo step, Esc cancels.
+function startStretch(e, id, edge, occStart) {
+  const n = M.findNote(id);
+  if (!n) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const orig = { date: n.date, end: n.end };
+  const len0 = noteLength(n);
+  const occEnd = isoDate(addDays(parseLocal(occStart), len0));
+  const seriesEnd = isoDate(addDays(parseLocal(orig.date), len0));
+  let last = null;
+  let queued = false;
+  document.body.classList.add('is-stretching');
+  closePopover();
+
+  const apply = (day) => {
+    if (edge === 'end') {
+      const to = day < occStart ? occStart : day;
+      const len = daysBetween(parseLocal(occStart), parseLocal(to));
+      n.date = orig.date;
+      n.end = len ? isoDate(addDays(parseLocal(orig.date), len)) : undefined;
+    } else {
+      const from = day > occEnd ? occEnd : day;
+      n.date = isoDate(addDays(parseLocal(orig.date), daysBetween(parseLocal(occStart), parseLocal(from))));
+      n.end = seriesEnd > n.date ? seriesEnd : undefined;
     }
-    if (/^[0-3]$/.test(e.key) && kind === 'task') { e.preventDefault(); M.updateTask(id, { priority: +e.key }); return; }
-    if (kind === 'note') {
-      if (e.key === 'Enter') { e.preventDefault(); editNote(id); return; }
-      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteWithUndo(M.findNote(id).text, () => M.deleteNote(id)); return; }
-    }
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      if (kind === 'task') editTask(item, id, item.dataset.day || null);
-      else if (/goal$/.test(kind)) editGoal(item, id);
-      else if (kind === 'project') editProject(item, id);
-      return;
-    }
-    if (e.key === 'Delete' || e.key === 'Backspace') {
-      e.preventDefault();
-      if (kind === 'task') deleteWithUndo(M.findTask(id).title, () => M.deleteTask(id));
-      else if (/goal$/.test(kind)) deleteWithUndo(M.findGoal(id).title, () => M.deleteGoal(id));
-      return;
-    }
-    if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && kind === 'task' && item.dataset.day) {
-      e.preventDefault();
-      const to = isoDate(addDays(parseLocal(item.dataset.day), e.key === 'ArrowRight' ? 1 : -1));
-      M.moveTask(id, to, { fromDay: item.dataset.day });
-      // Follow the task if it moved off screen.
-      if (view === 'days') { ensureRange(to); if (!isDayVisible(to)) goDays(e.key === 'ArrowRight' ? 1 : -1); }
-      const moved = [...root.querySelectorAll(`[data-id="${id}"]`)].find((x) => x.dataset.day === to);
-      moved?.focus({ preventScroll: true });
-      return;
-    }
-    if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
-      e.preventDefault();
-      const r = item.getBoundingClientRect();
-      item.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: r.left + 20, clientY: r.bottom - 4 }));
-      return;
-    }
-  }
-  if (e.altKey || view === 'list') return;
-  if (view === 'month') {
-    if (e.key === 'ArrowLeft' && !item) { e.preventDefault(); goMonth(-1); }
-    else if (e.key === 'ArrowRight' && !item) { e.preventDefault(); goMonth(1); }
-  } else if (e.key === 'ArrowLeft' && !item) { e.preventDefault(); goDays(e.shiftKey ? -7 : -1); }
-  else if (e.key === 'ArrowRight' && !item) { e.preventDefault(); goDays(e.shiftKey ? 7 : 1); }
-  if (e.key === 't' || e.key === 'T') { goToday(); }
-  else if (e.key === 'd' || e.key === 'D') setView('days');
-  else if (e.key === 'm' || e.key === 'M') setView('month');
-  else if (e.key === 'l' || e.key === 'L') setView('list');
+    if (!n.end) delete n.end;
+  };
+  const scroller = edgeScroller(() => { if (last) onMove(last); });
+  const onMove = (ev) => {
+    last = { clientX: ev.clientX, clientY: ev.clientY };
+    scroller.update(ev.clientX, ev.clientY);
+    const day = dayUnder(ev.clientX, ev.clientY);
+    if (!day) return;
+    apply(day);
+    if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; render(); }); }
+  };
+  const finish = (keep) => {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('keydown', onKey, true);
+    scroller.stop();
+    document.body.classList.remove('is-stretching');
+    const final = { date: n.date, end: n.end || '' };
+    n.date = orig.date;
+    if (orig.end) n.end = orig.end; else delete n.end;
+    const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+    window.addEventListener('click', swallow, { capture: true, once: true });
+    setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 0);
+    if (keep && (final.date !== orig.date || final.end !== (orig.end || ''))) {
+      M.updateNote(id, final);
+      if (final.end) toast(`${n.text}: ${SHORT(final.date)} – ${SHORT(final.end)}`, false, { label: 'Undo', fn: undo });
+    } else render();
+  };
+  const onUp = () => finish(true);
+  const onKey = (ev) => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); finish(false); } };
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('keydown', onKey, true);
 }
 
 async function importICS(file) {
@@ -1217,7 +1457,7 @@ async function importICS(file) {
         if (item.weekdays) prev.weekdays = item.weekdays; else delete prev.weekdays;
         updated++;
       }
-      else { ev().push({ id: uid(), source, category: source.toLowerCase().slice(0, 24), done: false, ...item }); added++; }
+      else { ev().push({ id: uid(), source, category: M.canonicalCategory(source.slice(0, 24)), done: false, ...item }); added++; }
     }
     commit('events');
     toast(`Imported ${added} new and updated ${updated} item${added + updated === 1 ? '' : 's'}`, false, { label: 'Undo', fn: undo });
@@ -1256,6 +1496,51 @@ export function initPlan() {
     hoverZone = e.target.closest?.('[data-zone]')?.dataset.zone || null;
   }, { passive: true });
   root.addEventListener('pointerleave', () => { hoverDay = null; hoverZone = null; });
+  // Note handles: stretch a note across days. And for bars, remember which day was grabbed so a
+  // drop lines that day up with the day under the pointer.
+  root.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const grip = e.target.closest('[data-grip]');
+    const note = e.target.closest('[data-drag="note"]');
+    if (grip && note) { startStretch(e, note.dataset.id, grip.dataset.grip, note.dataset.day); return; }
+    if (note?.dataset.span) note.dataset.grab = dayUnder(e.clientX, e.clientY) || note.dataset.day;
+  }, true);
+  // Hold the right mouse button and drag to pan the board. A plain right-click still opens the menu:
+  // the menu waits until the button comes back up without having moved.
+  let pan = null;
+  let skipMenu = false; // the menu event some systems send right after a pan ends
+  window.addEventListener('pointerdown', () => { skipMenu = false; }, true);
+  scrollEl.addEventListener('pointerdown', (e) => {
+    if (e.button !== 2 || e.target.closest('input, textarea')) return;
+    pan = { x: e.clientX, y: e.clientY, left: scrollEl.scrollLeft, top: scrollEl.scrollTop, moved: false, menu: null };
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!pan) return;
+    if (!(e.buttons & 2)) { pan = null; document.body.classList.remove('is-panning'); return; }
+    const dx = e.clientX - pan.x, dy = e.clientY - pan.y;
+    if (!pan.moved && Math.hypot(dx, dy) < 6) return;
+    if (!pan.moved) { pan.moved = true; closeMenu(); document.body.classList.add('is-panning'); }
+    scrollEl.scrollLeft = pan.left - dx;
+    scrollEl.scrollTop = pan.top - dy;
+  });
+  window.addEventListener('pointerup', (e) => {
+    if (!pan || e.button !== 2) return;
+    const p = pan;
+    pan = null;
+    document.body.classList.remove('is-panning');
+    if (p.moved) skipMenu = true;
+    else if (p.menu) onContext(p.menu);
+  });
+  // Some systems fire the menu event on press, others on release: hold it until we know it wasn't a pan.
+  root.addEventListener('contextmenu', (e) => {
+    if (skipMenu) { skipMenu = false; e.preventDefault(); e.stopPropagation(); return; }
+    if (pan && !pan.moved && !e.target.closest('input, textarea')) {
+      e.preventDefault();
+      e.stopPropagation();
+      pan.menu = { target: e.target, clientX: e.clientX, clientY: e.clientY, detail: 1, type: 'contextmenu', preventDefault() {} };
+    }
+  }, true);
+  $('planKeys').addEventListener('click', openShortcuts);
   document.addEventListener('copy', onCopy);
   document.addEventListener('paste', onPaste);
   // Clicking away from a note being edited saves it.
@@ -1305,6 +1590,20 @@ export function initPlan() {
   root.querySelectorAll('.view-toggle button').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
 
   scrollEl.addEventListener('scroll', onScroll, { passive: true });
+  // When scrolling stops part-way through a day, settle on the nearest whole day.
+  let held = false;
+  window.addEventListener('pointerdown', () => { held = true; }, true);
+  window.addEventListener('pointerup', () => { held = false; settle(); }, true);
+  let settleTimer = 0;
+  const settle = () => {
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => {
+      if (view !== 'days' || held || document.body.matches('.is-dragging, .is-selecting, .is-stretching, .is-panning')) return;
+      const target = Math.round(scrollEl.scrollLeft / colW) * colW;
+      if (Math.abs(target - scrollEl.scrollLeft) > 1) scrollEl.scrollTo({ left: target, behavior: 'smooth' });
+    }, 160);
+  };
+  scrollEl.addEventListener('scroll', settle, { passive: true });
   // A plain mouse wheel scrolls the days sideways, unless a day is tall enough to need scrolling down.
   scrollEl.addEventListener('wheel', (e) => {
     if (view !== 'days' || e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;

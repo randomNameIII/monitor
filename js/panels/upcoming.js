@@ -1,18 +1,22 @@
 import { registerPanel } from '../core/registry.js';
 import { occurrences, dayLabel, formatTime, formatTimeRange, startOfDay, addDays, isoDate, parseLocal } from '../core/util.js';
-import { notesForDay } from '../core/planning.js';
+import { notesForDay, categoryHue } from '../core/planning.js';
 
 // Project color wins; otherwise a stable soft color per category name, so "school" is always the same tint.
 function tint(ev, projects) {
   const p = ev.projectId && (projects || []).find((x) => x.id === ev.projectId);
   if (p && !ev.category) return { hue: p.hue, tag: p.title };
-  return { hue: categoryHue(ev.category), tag: ev.category || (p ? p.title : '') };
+  return { hue: categoryHue(ev.category, colors), tag: ev.category || (p ? p.title : '') };
 }
+let colors = null; // set from the board's data on each draw
 
-export function categoryHue(name) {
-  let h = 0;
-  for (const ch of String(name || '').toLowerCase()) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  return h;
+// "Winter break · until Jan 12" on the first day it's shown (or the day it starts); "· last day" on its last.
+function spanSuffix(n, day, first) {
+  if (!n.len) return '';
+  const short = (k) => parseLocal(k).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  if (day === n.end) return '<span class="n-span"> · last day</span>';
+  if (first || day === n.start) return `<span class="n-span"> · until ${short(n.end)}</span>`;
+  return '';
 }
 
 const title = (ctx) => (ctx.settings.title ? `<h3 class="panel-title">${ctx.esc(ctx.settings.title)}</h3>` : '');
@@ -23,6 +27,7 @@ function mountColumns(ctx) {
   const n = Math.max(2, Math.min(7, Math.round(s.columns) || 4));
 
   const draw = () => {
+    colors = ctx.data.categoryColors || null;
     const now = new Date();
     const today = startOfDay(now);
     // Start the window at midnight so today's earlier events are available to show dimmed.
@@ -53,7 +58,7 @@ function mountColumns(ctx) {
       }).join('');
 
       const notes = s.showNotes ? notesForDay(ctx.data.notes, isoDate(day)) : [];
-      const noteHtml = notes.length ? `<ul class="upc-notes">${notes.map((n) => `<li>${ctx.esc(n.text)}</li>`).join('')}</ul>` : '';
+      const noteHtml = notes.length ? `<ul class="upc-notes">${notes.map((n) => `<li>${ctx.esc(n.text)}${spanSuffix(n, isoDate(day), i === 0)}</li>`).join('')}</ul>` : '';
       cols += `<section class="upc-col${i === 0 ? ' today' : ''}${weekend ? ' weekend' : ''}">
         <header><span class="upc-label">${label}</span><span class="upc-date">${date}</span></header>
         ${noteHtml}
@@ -128,6 +133,7 @@ registerPanel({
     if (ctx.settings.layout === 'columns') return mountColumns(ctx);
     const s = ctx.settings;
     const draw = () => {
+      colors = ctx.data.categoryColors || null;
       const now = new Date();
       const list = occurrences(ctx.data.events, {
         from: now, days: s.days, categories: String(s.categories || '').split(','),
@@ -157,7 +163,7 @@ registerPanel({
       for (const key of dayKeys) {
         const notes = s.showNotes ? notesForDay(ctx.data.notes, key) : [];
         html += `<div class="up-day">${dayLabel(parseLocal(key), now)}</div>`;
-        if (notes.length) html += `<ul class="up-notes">${notes.map((n) => `<li>${ctx.esc(n.text)}</li>`).join('')}</ul>`;
+        if (notes.length) html += `<ul class="up-notes">${notes.map((n) => `<li>${ctx.esc(n.text)}${spanSuffix(n, key, key === dayKeys[0])}</li>`).join('')}</ul>`;
         const rows = list.filter((x) => x.day === key);
         if (rows.length) html += `<ol>${rows.map(row).join('')}</ol>`;
       }
@@ -173,8 +179,9 @@ registerPanel({
     .up-day { font-size: min(4.6cqh, 3.4cqw); color: var(--accent); font-weight: 600; margin-top: 1.4cqh; }
     .up-day:first-child { margin-top: 0; }
     .up-notes, .upc-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3em; flex: none; }
-    .up .up-notes li, .upc .upc-notes li { display: block; color: var(--text); font-style: italic; padding: 0 0 0 .7em;
-      border-left: 2px solid var(--ember); line-height: 1.3; opacity: 1; text-decoration: none; }
+    .up .up-notes li, .upc .upc-notes li { display: block; color: #f3d6bd; font-style: italic; padding: 0; border: 0;
+      line-height: 1.3; opacity: 1; text-decoration: none; }
+    .n-span { font-style: normal; color: var(--text-faint); font-size: .85em; }
     .up .up-notes li { font-size: min(5cqh, 3.6cqw); }
     .upc .upc-notes li { font-size: calc(var(--fs) * .92); }
     .up ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .8cqh; }

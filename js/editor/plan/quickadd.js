@@ -11,7 +11,7 @@ import { cleanLines } from './editors.js';
 
 const KINDS = [
   { id: 'task', label: 'Task', hint: 'Lab report fri 5pm #school @project !!' },
-  { id: 'note', label: 'Day note', hint: 'Essay due fri · Going to school event tomorrow' },
+  { id: 'note', label: 'Day note', hint: 'Essay due fri · Winter break dec 18 - jan 12 · Trash day every tue' },
   { id: 'day-goal', label: 'Daily goal', hint: 'Read 20 pages tomorrow' },
   { id: 'week-goal', label: 'Weekly goal', hint: 'Go to the gym 3x' },
   { id: 'project', label: 'Project', hint: 'Research paper due nov 20' },
@@ -60,8 +60,8 @@ export function createParsed(p, ctx = {}) {
     return { kind: 'task', item, where: p.dateKey ? dayLabel(p.date) : projectId ? M.findProject(projectId).title : 'Inbox' };
   }
   if (k === 'note') {
-    const item = M.addNote({ date: p.dateKey, text: p.title });
-    return { kind: 'note', item, where: `notes for ${dayLabel(p.date)}` };
+    const item = M.addNote({ date: p.dateKey, end: p.endKey, text: p.title, repeat: p.repeat, weekdays: p.weekdays, until: p.untilKey });
+    return { kind: 'note', item, where: p.endKey ? `notes, ${dayLabel(p.date)} to ${dayLabel(p.endDate)}` : `notes for ${dayLabel(p.date)}` };
   }
   if (k === 'day-goal' || k === 'week-goal') {
     const item = M.addGoal({ scope: k === 'day-goal' ? 'day' : 'week', date: p.dateKey, title: p.title, target: p.target });
@@ -95,8 +95,10 @@ function chips(p) {
     if (p.project) chip('◆', p.project.title);
     if (p.newProject) chip('◆', `New project: ${p.newProject}`, 'new');
   } else if (kind === 'note') {
-    chip('◷', dayLabel(p.date));
-    chip('✎', 'A note on that day, not a task', 'muted');
+    if (p.endDate) chip('◷', `${dayLabel(p.date)} to ${dayLabel(p.endDate)}`);
+    else chip('◷', dayLabel(p.date));
+    if (p.repeat !== 'none') chip('↻', `${p.weekdays?.length > 1 ? `Every ${weekdaysLabel(p.weekdays)}` : REPEAT_LABEL[p.repeat]}${p.until ? ` until ${dayLabel(p.until)}` : ''}`);
+    chip('✎', p.endDate ? 'One note across those days' : 'A note on the day, not a task', 'muted');
   } else if (kind === 'day-goal') {
     chip('◷', dayLabel(p.date));
     if (p.target > 1) chip('×', `${p.target} times`);

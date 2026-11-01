@@ -27,7 +27,7 @@ const nextOrder = (list) => (list.length ? Math.max(...list.map((x) => x.order ?
 export function addTask(fields) {
   const t = {
     id: uid(), title: fields.title || 'Untitled', date: fields.date || '', time: fields.time || '',
-    category: fields.category || '', repeat: fields.repeat || 'none', until: '',
+    category: canonicalCategory(fields.category), repeat: fields.repeat || 'none', until: '',
     projectId: fields.projectId || '', done: false,
   };
   if (fields.end && t.time) t.end = fields.end;
@@ -206,14 +206,55 @@ export function deleteGoal(id) {
   save();
 }
 
+/* ---------------- categories ---------------- */
+
+export const allCategories = () => [...new Set(data().events.map((e) => e.category).filter(Boolean))]
+  .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+// "eng111" typed when "ENG111" already exists → "ENG111", so one category doesn't split in two.
+export function canonicalCategory(name) {
+  const n = String(name || '').trim();
+  if (!n) return '';
+  return allCategories().find((c) => c.toLowerCase() === n.toLowerCase()) || n;
+}
+
+const colorsMap = () => (data().categoryColors ||= {});
+
+export function setCategoryColor(name, hue) {
+  const key = name.toLowerCase();
+  if (hue == null) delete colorsMap()[key]; else colorsMap()[key] = Math.round(hue) % 360;
+  save();
+}
+
+// Rename everywhere (any capitalisation of the old name). Renaming onto an existing name merges them.
+export function renameCategory(from, to) {
+  const target = String(to || '').trim();
+  if (!target) return;
+  const lo = from.toLowerCase();
+  for (const e of data().events) if ((e.category || '').toLowerCase() === lo) e.category = target;
+  const map = colorsMap();
+  if (map[lo] != null && target.toLowerCase() !== lo) { if (map[target.toLowerCase()] == null) map[target.toLowerCase()] = map[lo]; delete map[lo]; }
+  save();
+}
+
+export function deleteCategory(name) {
+  const lo = name.toLowerCase();
+  for (const e of data().events) if ((e.category || '').toLowerCase() === lo) e.category = '';
+  delete colorsMap()[lo];
+  save();
+}
+
 /* ---------------- day notes ---------------- */
 
 const notesList = () => (data().notes ||= []);
 export const findNote = (id) => notesList().find((n) => n.id === id);
 
-export function addNote({ date, text }) {
+// A note on one day, or across days when `end` is set; it can repeat like a task.
+export function addNote({ date, end = '', text, repeat = 'none', weekdays = null, until = '' }) {
   const n = { id: uid(), date, text: String(text || '').trim() };
   if (!n.text || !date) return null;
+  if (end && end > date) n.end = end;
+  if (repeat && repeat !== 'none') { n.repeat = repeat; if (until) n.until = until; if (weekdays?.length > 1) n.weekdays = [...weekdays]; }
   n.order = nextOrder(notesList().filter((x) => x.date === date));
   notesList().push(n);
   save();
@@ -224,13 +265,22 @@ export function updateNote(id, patch) {
   const n = findNote(id);
   if (!n) return;
   Object.assign(n, patch);
+  if (!n.end || n.end <= n.date) delete n.end;
+  if (!n.repeat || n.repeat === 'none') { delete n.repeat; delete n.until; delete n.weekdays; }
   save();
 }
 
-export function moveNote(id, { date, beforeId = null }) {
+// Move a note so the appearance that started on `fromDay` starts on `toDay` instead. Multi-day and
+// repeating notes shift as a whole, keeping their length and pattern.
+export function moveNote(id, { toDay, fromDay = null, beforeId = null }) {
   const n = findNote(id);
-  if (!n) return;
-  if (date) n.date = date;
+  if (!n || !toDay) return;
+  const delta = daysBetween(parseLocal(fromDay || n.date), parseLocal(toDay));
+  const shift = (d) => (d ? isoDate(addDays(parseLocal(d), delta)) : d);
+  n.date = shift(n.date);
+  if (n.end) n.end = shift(n.end);
+  if (n.until) n.until = shift(n.until);
+  if (n.weekdays?.length) n.weekdays = n.weekdays.map((w) => (((w + delta) % 7) + 7) % 7);
   reorderInto(notesList().filter((x) => x !== n && x.date === n.date), n, beforeId);
   save();
 }

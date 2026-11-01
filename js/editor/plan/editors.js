@@ -151,7 +151,9 @@ export function editTask(anchor, id, day = null) {
       q('priority').querySelectorAll('[data-v]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
     });
     q('projectId').addEventListener('change', (e) => M.updateTask(id, { projectId: e.target.value }));
-    q('category').addEventListener('input', (e) => M.updateTask(id, { category: e.target.value.trim().toLowerCase() }, { group: `cat:${id}` }));
+    q('category').addEventListener('input', (e) => M.updateTask(id, { category: e.target.value.trim() }, { group: `cat:${id}` }));
+    // When you leave the box, match an existing category's spelling (eng111 → ENG111).
+    q('category').addEventListener('change', (e) => { const c = M.canonicalCategory(e.target.value); if (c !== cur().category) { M.updateTask(id, { category: c }, { group: `cat:${id}` }); } e.target.value = c; });
     q('notes').addEventListener('input', (e) => M.updateTask(id, { notes: e.target.value }, { group: `notes:${id}` }));
 
     // Steps: a small checklist inside the task.
@@ -192,6 +194,121 @@ export function editTask(anchor, id, day = null) {
     q('duplicate').addEventListener('click', () => { M.duplicateTask(id); closePopover(); toast('Duplicated'); });
     q('delete').addEventListener('click', () => deleteWithUndo(t.title, () => M.deleteTask(id)));
   }, { key: `task:${id}`, width: 352 });
+}
+
+/* ---------------- day note ---------------- */
+
+const NOTE_REPEATS = [['none', 'Doesn’t repeat'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['yearly', 'Every year'], ['daily', 'Every day']];
+
+export function editNoteDetails(anchor, id, { focusEnd = false } = {}) {
+  const n = M.findNote(id);
+  if (!n) return;
+  openPopover(anchor, (el) => {
+    const repeating = n.repeat && n.repeat !== 'none';
+    el.innerHTML = `
+      <textarea class="pop-title note-title" rows="1" data-f="text" aria-label="Note">${esc(n.text)}</textarea>
+      <p class="pop-note">A note shows on the day (or across the days) without being a task.</p>
+      <div class="pop-grid">
+        ${field('From', `<input type="date" data-f="date" value="${esc(n.date)}">`)}
+        <label class="pf"><span>To<button type="button" class="link pf-clear" data-f="oneday" ${n.end ? '' : 'hidden'}>One day</button></span><input type="date" data-f="end" value="${esc(n.end || '')}" min="${esc(n.date)}"></label>
+        ${field('Repeats', `<select data-f="repeat">${NOTE_REPEATS.map(([v, l]) => `<option value="${v}" ${v === (n.repeat || 'none') ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}
+        ${field('Until', `<input type="date" data-f="until" value="${esc(n.until || '')}">`, `pf-until${repeating ? '' : ' hidden'}`)}
+      </div>
+      <p class="pop-note small">Tip: drag a note’s right edge across days on the board to stretch it, or its ends to change the dates.</p>
+      <div class="pop-actions">
+        <button type="button" class="btn ghost small" data-f="task">Make it a task</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn danger small" data-f="delete">Delete</button>
+      </div>`;
+    const q = (f) => el.querySelector(`[data-f="${f}"]`);
+    const cur = () => M.findNote(id);
+    const text = q('text');
+    const grow = () => { text.style.height = 'auto'; text.style.height = `${text.scrollHeight}px`; };
+    requestAnimationFrame(grow);
+    text.addEventListener('input', grow);
+    text.addEventListener('change', () => { if (text.value.trim()) M.updateNote(id, { text: text.value.replace(/\n/g, ' ').trim() }); });
+    text.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); text.dispatchEvent(new Event('change')); closePopover(); } });
+    q('date').addEventListener('change', (e) => {
+      if (!e.target.value) return;
+      // Moving the start keeps the length.
+      const c = cur();
+      const len = c.end ? (parseLocal(c.end) - parseLocal(c.date)) / 86400000 : 0;
+      const end = len ? isoDate(new Date(parseLocal(e.target.value).getTime() + len * 86400000)) : '';
+      M.updateNote(id, { date: e.target.value, end });
+      q('end').value = end; q('end').min = e.target.value;
+    });
+    q('end').addEventListener('change', (e) => {
+      const v = e.target.value && e.target.value > cur().date ? e.target.value : '';
+      M.updateNote(id, { end: v });
+      e.target.value = v;
+      q('oneday').hidden = !v;
+    });
+    q('oneday').addEventListener('click', () => { M.updateNote(id, { end: '' }); q('end').value = ''; q('oneday').hidden = true; });
+    q('repeat').addEventListener('change', (e) => {
+      M.updateNote(id, { repeat: e.target.value });
+      el.querySelector('.pf-until').classList.toggle('hidden', e.target.value === 'none');
+    });
+    q('until').addEventListener('change', (e) => M.updateNote(id, { until: e.target.value }));
+    q('task').addEventListener('click', () => {
+      const c = cur();
+      M.batch(() => { M.addTask({ title: c.text, date: c.date }); M.deleteNote(id); });
+      closePopover();
+      toast('Turned into a task', false, { label: 'Undo', fn: undo });
+    });
+    q('delete').addEventListener('click', () => deleteWithUndo(n.text, () => M.deleteNote(id)));
+    if (focusEnd) requestAnimationFrame(() => q('end').focus());
+  }, { key: `note:${id}`, width: 330 });
+}
+
+/* ---------------- category ---------------- */
+
+const CAT_HUES = [0, 20, 38, 55, 90, 140, 170, 195, 215, 240, 270, 300, 330];
+
+export function editCategory(anchor, name, hueOf) {
+  let current = name;
+  openPopover(anchor, (el) => {
+    const count = state.cfg.data.events.filter((e) => (e.category || '').toLowerCase() === name.toLowerCase()).length;
+    const custom = state.cfg.data.categoryColors?.[name.toLowerCase()] != null;
+    el.innerHTML = `
+      <input class="pop-title cat-name" data-f="name" value="${esc(name)}" aria-label="Category name" spellcheck="false">
+      <p class="pop-note">${count} task${count === 1 ? '' : 's'}. Renaming changes every one of them; you can fix capitals here too.</p>
+      <div class="pf pf-wide"><span>Color</span>
+        <div class="hues cat-hues">
+          <button type="button" class="hue auto${custom ? '' : ' on'}" data-hue="" title="Automatic color" aria-label="Automatic color">A</button>
+          ${CAT_HUES.map((h) => `<button type="button" class="hue" style="--h:${h}" data-hue="${h}" aria-label="Hue ${h}"></button>`).join('')}
+        </div>
+        <div class="range-row"><input type="range" min="0" max="359" step="1" data-f="hue" value="${hueOf(name)}" aria-label="Exact color"><i class="cat-swatch" style="--h:${hueOf(name)}"></i></div>
+      </div>
+      <div class="pop-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn danger small" data-f="delete">Remove category</button>
+      </div>`;
+    const q = (f) => el.querySelector(`[data-f="${f}"]`);
+    const paint = () => {
+      const isCustom = state.cfg.data.categoryColors?.[current.toLowerCase()] != null;
+      const h = hueOf(current);
+      el.querySelectorAll('.cat-hues .hue').forEach((b) => b.classList.toggle('on', b.dataset.hue === '' ? !isCustom : isCustom && +b.dataset.hue === h));
+      q('hue').value = h;
+      el.querySelector('.cat-swatch').style.setProperty('--h', h);
+    };
+    el.querySelector('.cat-hues').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-hue]');
+      if (!b) return;
+      M.setCategoryColor(current, b.dataset.hue === '' ? null : +b.dataset.hue);
+      paint();
+    });
+    q('hue').addEventListener('input', (e) => { M.setCategoryColor(current, +e.target.value); paint(); });
+    const rename = () => {
+      const v = q('name').value.trim();
+      if (!v || v === current) return;
+      M.renameCategory(current, v);
+      current = v;
+    };
+    q('name').addEventListener('change', rename);
+    q('name').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); rename(); closePopover(); } });
+    q('delete').addEventListener('click', () => deleteWithUndo(current, () => M.deleteCategory(current)));
+    paint();
+  }, { key: `cat:${name}`, width: 320 });
 }
 
 /* ---------------- goal ---------------- */

@@ -28,16 +28,16 @@ It's a plain static site (HTML, CSS and JavaScript modules, no build step), so G
 - Settings forms are generated from each panel's definition, so new panels get an editor for free.
 - **Plan tab**
 
-Three views, switched with the buttons at the top or <kbd>D</kbd> / <kbd>M</kbd> / <kbd>L</kbd>; the editor remembers the last one you used.
+Three views, switched with the buttons at the top or <kbd>V</kbd> (next view) and <kbd>M</kbd> (month); the editor remembers the last one you used.
 
-- **Days**: opens on today and the next 6 days, and scrolls sideways as far as you like in either direction. Mouse wheel or trackpad, <kbd>←</kbd>/<kbd>→</kbd> for a day, <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> or the arrow buttons for 7 days, <kbd>T</kbd> or **Today** to come back.
+- **Days**: opens on today and the next 6 days, and scrolls sideways as far as you like in either direction. Mouse wheel, trackpad or right-drag, <kbd>←</kbd>/<kbd>→</kbd> for a day, <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> or the arrow buttons for 7 days, <kbd>T</kbd> or **Today** to come back.
 - **Month**: the whole month as a calendar grid. Drag tasks between days, double-click a day to add, box-select, right-click. A day with more than fits shows "+3 more"; click it (or the date) to open that day in the Days view. <kbd>←</kbd>/<kbd>→</kbd> change month.
 - **List**: everything in one searchable table, with .ics import (Canvas, Google Calendar, Outlook) and a button to clear out finished items.
 
 Your goals, projects and an inbox sit beside every view. The Goals list follows the week on screen.
 
 - **Adding things.** Press <kbd>N</kbd> (or Ctrl/Cmd+K, or the big round + button) from any tab. Type naturally and the preview shows what was understood:
-  - `Lab report fri 5pm #school` → Friday at 5pm, category school
+  - `Lab report fri 5pm #ENG111` → Friday at 5pm, category ENG111 (capitals are kept; typing `#eng111` later reuses ENG111)
   - `Find sources @paper tomorrow` → tomorrow, in the project whose name starts with "paper" (a new project is made if none matches)
   - `Chem lecture mwf 9-9:50am` → every Monday, Wednesday and Friday, 9:00 to 9:50. Also `tth`, `tue thu`, `every mon, wed and fri`, `weekdays`, `daily`, `every month`
   - `Seminar 11-1pm`, `from 2pm to 3:30pm` → a start and end time
@@ -46,7 +46,10 @@ Your goals, projects and an inbox sit beside every view. The Goals list follows 
   - Words in "quotes" stay literal, e.g. `Study for "SAT" sat`.
 
   <kbd>Tab</kbd> switches between task, daily goal, weekly goal (`Gym 3x` sets how many times) and project (`Paper due nov 20`). <kbd>Shift</kbd>+<kbd>Enter</kbd> adds and keeps the box open for the next one.
-- **Day notes.** For things you should know about a day that aren't tasks ("Essay due today", "Going to school event"). Hover a day and click **Note** at the bottom, right-click the day header and pick **Add note**, or press <kbd>N</kbd> and <kbd>Tab</kbd> to **Day note** (a date in the text, like "fri", picks the day). Notes have no checkbox and an orange edge. Click one to edit it (empty it to delete), drag it to another day (hold <kbd>Alt</kbd> to copy), or right-click to move it, copy it to next week, or turn it into a task. They show in the Days and Month views and on the wall's Upcoming panel, even on days with no tasks.
+- **Day notes.** For things you should know about a day that aren't tasks ("Essay due today", "Going to school event"). They're plain italic text, with no checkbox or box. Hover a day and click **Note** at the bottom, right-click the day header and pick **Add note**, or press <kbd>Shift</kbd>+<kbd>N</kbd> (or <kbd>N</kbd> then <kbd>Tab</kbd> to **Day note**). Click a note to edit it (empty it to delete), drag it to another day (hold <kbd>Alt</kbd> to copy), or right-click for more.
+  - **Across several days**: type a range, like `Winter break dec 18 - jan 12`, `Thanksgiving nov 23-27`, `Conference from thu to sat` or `Reading week 12/1-12/5`, and it's one note drawn as a bar across those days (in Month view, a bar across each week it touches). Or hover a one-day note and drag the little handle on its right edge across days. Drag either end of a bar to change the dates; drag the middle to move it (the day you grabbed lands where you drop). Click a bar to edit its dates.
+  - **Repeating**: `Trash day every tue`, `Club meets every wed until dec 9`, `Mom's birthday nov 20 yearly`, or set **Repeats** in the note's details (right-click → Dates and repeat…).
+  - Notes show in the Days and Month views and on the wall's Upcoming panel, even on days with no tasks; a multi-day note says "until Dec 12" and "last day" there.
 - **Paste a list.** Paste several lines (from a syllabus, notes, an email) into quick add, a day's add box, or straight onto the board, and each line becomes its own task. Bullets, numbers and checkboxes are stripped, and dates in each line still work. On the board, pasted tasks land on the day under the pointer (or the inbox if you're pointing at it).
 - **Copy.** <kbd>Ctrl</kbd>+<kbd>C</kbd> copies the selected or focused tasks; point at a day and <kbd>Ctrl</kbd>+<kbd>V</kbd> to paste copies there, keeping their spacing. Or hold <kbd>Alt</kbd> while dropping a drag to drop a copy and leave the original.
 - **Mouse shortcuts.** Double-click a day to type straight into it (Enter adds and keeps the box open). Middle-click a day for quick add with that day filled in. Hover a day for **Note** and **Goal** next to **+ Add**.
@@ -54,7 +57,9 @@ Your goals, projects and an inbox sit beside every view. The Goals list follows 
 - **Select several at once.** Drag across empty space to draw a box around tasks and day goals (hold Shift to add to what's selected), Shift/Ctrl-click to pick individual ones, or Ctrl+A for everything on screen. Then drag any of them to move them all (they keep their spacing), right-click for bulk options, or use <kbd>Space</kbd> (done), <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> (shift a day), <kbd>0</kbd>–<kbd>3</kbd> (priority), <kbd>Delete</kbd>. <kbd>Esc</kbd> clears the selection. Bulk changes undo in one step.
 - **Right-click** anything for options: mark done, move to today/tomorrow/next week, project, category, priority, copy, duplicate, delete. Right-click a day header to mark everything done or push unfinished tasks to the next day.
 - **Click** a task to edit it in place: date, start and end time, repeat (with weekday buttons for weekly repeats), priority, project, category, **steps** (a checklist inside the task; paste a list to add several) and notes. Changes save as you type, and cards show steps done ("☑ 2/5").
-- **Keyboard** on a focused task: <kbd>Space</kbd> done, <kbd>Enter</kbd> edit, <kbd>0</kbd>–<kbd>3</kbd> priority, <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> move a day, <kbd>Delete</kbd> delete.
+- **Categories** are listed in the sidebar with their colors. Click one to pick its color (or set it back to automatic) and to rename it everywhere at once (handy for fixing capitals); drop tasks on one to tag them. The colors show on task edges and on the wall.
+- **Keyboard shortcuts** are yours to change: click **Shortcuts** in the Plan header (or press <kbd>?</kbd>), click “+ key” next to an action and press a key. Defaults on a focused or selected item: <kbd>Space</kbd> done, <kbd>Enter</kbd> edit, <kbd>D</kbd> duplicate, <kbd>Delete</kbd> delete, <kbd>0</kbd>–<kbd>3</kbd> priority, <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> move a day. Elsewhere: <kbd>N</kbd> quick add, <kbd>Shift</kbd>+<kbd>N</kbd> note, <kbd>T</kbd> today, <kbd>←</kbd>/<kbd>→</kbd> a day, <kbd>V</kbd> next view, <kbd>M</kbd> month. Unbound extras you can assign: move to tomorrow, move a week later, move to inbox, Days/List view, add a goal or project. Bindings are saved in the browser you set them in.
+- **Right-drag to scroll.** Hold the right mouse button and drag to pan the days (a plain right-click still opens the menu).
 - **Goals**: daily goals sit at the top of each day; week goals are in the sidebar with a progress bar. Click the marks of a "3x" goal to count one; Shift+click or right-click removes one. When a week ends with goals unfinished, the next week offers to bring them over.
 - **Projects** fill their progress bar from their tasks (or a manual slider if they have none) and show days left. Expand one to see and add its tasks.
 - **Overdue** tasks that are off the left of the screen collect in the sidebar so you can drag them onto a day.
