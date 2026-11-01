@@ -65,7 +65,7 @@ function mountColumns(ctx) {
         const { hue, tag: label } = tint(ev, ctx.data.projects);
         const tag = s.showCategory && label ? `<span class="upc-cat">${ctx.esc(label)}</span>` : '';
         return `<li class="${done ? 'done' : ''}${soon ? ' soon' : ''}${ev.allDay ? ' allday' : ''}" style="--h:${hue}">
-          <span class="upc-time">${ev.allDay ? 'All day' : formatTimeRange(ev.day, ev.time, ev.end, s.hour24)}${tag}</span>
+          ${ev.allDay && !tag ? '' : `<span class="upc-time">${ev.allDay ? '' : formatTimeRange(ev.day, ev.time, ev.end, s.hour24)}${tag}</span>`}
           <span class="upc-title">${ev.priority ? `<b class="upc-prio">${'!'.repeat(ev.priority)}</b>` : ''}${ctx.esc(ev.title)}</span>
           ${ev.due ? `<span class="upc-due">${dueTag(ev)}</span>` : ''}
         </li>`;
@@ -168,7 +168,7 @@ registerPanel({
         const soon = !ev.allDay && ev.at - now < 3 * 3600 * 1000 && ev.at > now;
         const { hue, tag: label } = tint(ev, ctx.data.projects);
         return `<li class="${soon && !ev.done ? 'soon' : ''}${ev.done ? ' done' : ''}">
-          <span class="up-time">${ev.allDay ? 'All day' : formatTime(ev.at, s.hour24)}</span>
+          <span class="up-time">${ev.allDay ? '' : formatTime(ev.at, s.hour24)}</span>
           <span class="up-title">${ev.priority ? `<b class="upc-prio">${'!'.repeat(ev.priority)}</b>` : ''}${ctx.esc(ev.title)} ${dueTag(ev)}</span>
           ${s.showCategory && label ? `<span class="up-cat" style="--h:${hue}">${ctx.esc(label)}</span>` : ''}
         </li>`;
@@ -200,6 +200,7 @@ registerPanel({
     .due-tag { font-size: .8em; color: var(--ember); font-weight: 600; white-space: nowrap; }
     .due-tag.late { color: #f08a8f; }
     .upc-due { display: block; margin-top: .15em; font-size: .9em; }
+    .upc-due .due-tag { white-space: normal; }
     .up .up-notes li { font-size: min(5cqh, 3.6cqw); }
     .upc .upc-notes li { font-size: calc(var(--fs) * .92); }
     .up ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .8cqh; }
