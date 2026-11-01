@@ -59,6 +59,7 @@ registerPanel({
 | `minSize` | | Smallest size the editor allows when resizing. |
 | `defaultStyle` | | `'card'`, `'outline'` or `'bare'`. Overrides the board default unless the user picks a style for this panel. |
 | `usesData` | | Set to `true` if you read `ctx.data` (events). The panel then re-renders when events change. |
+| `appearance` | | Shared options your CSS supports: `['align', 'valign']`. The editor then offers Alignment and Vertical position, and the panel element gets `data-align="left|center|right"` and `data-valign="top|middle|bottom"`. Style them with selectors like `.panel[data-align="center"] .quote { text-align: center; }`. Text size works for every panel without any code. |
 | `settings` | | Array of fields; see below. |
 | `mount(ctx)` | yes | Draw the panel. Called again whenever its settings change. May return `{ destroy() }`. |
 | `css` | | A CSS string injected once. Scope it under a class unique to your panel. |
@@ -79,6 +80,7 @@ Every field has `key`, `label`, `type` and `default`. Optional on all: `help` (s
 | `date` | `'YYYY-MM-DD'` | |
 | `time` | `'HH:MM'` | |
 | `location` | `{ name, lat, lon }` or `null` | City search plus "Use my location" |
+| `checks` | `{ part: true/false }` | A row of chips to show or hide parts of the panel. `options: [{ value: 'date', label: 'Date' }]`, `default: { date: true }`. Parts missing from a saved board get their default. `legacy: { date: 'showDate' }` carries over an older toggle. |
 | `heading` | none | A sub-heading in the form; no value |
 
 ## What `ctx` gives you

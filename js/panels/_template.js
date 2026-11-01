@@ -11,9 +11,10 @@ registerPanel({
   minSize: { w: 2, h: 1 },
   // defaultStyle: 'bare',      // card | outline | bare — overrides the board default
   // usesData: true,            // set if you read ctx.data (events etc.) so edits re-render the panel
+  // appearance: ['align', 'valign'], // offer Alignment / Vertical position; style .panel[data-align="center"] etc.
 
   // Each entry becomes a form field in the editor. Values arrive in ctx.settings.
-  // Types: text, textarea, number, toggle, select, color, date, time, location, heading.
+  // Types: text, textarea, number, range, toggle, select, checks, color, date, time, location, heading.
   settings: [
     { key: 'message', label: 'Message', type: 'text', default: 'Hello, room.' },
     { key: 'refresh', label: 'Refresh every (minutes)', type: 'number', default: 10, min: 1, max: 120 },
