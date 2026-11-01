@@ -11,6 +11,7 @@ import { cleanLines } from './editors.js';
 
 const KINDS = [
   { id: 'task', label: 'Task', hint: 'Lab report fri 5pm #school @project !!' },
+  { id: 'note', label: 'Day note', hint: 'Essay due fri · Going to school event tomorrow' },
   { id: 'day-goal', label: 'Daily goal', hint: 'Read 20 pages tomorrow' },
   { id: 'week-goal', label: 'Weekly goal', hint: 'Go to the gym 3x' },
   { id: 'project', label: 'Project', hint: 'Research paper due nov 20' },
@@ -36,7 +37,7 @@ export function resolveLine(text, ctx = {}) {
   const ctxDay = ctx.day ? parseLocal(ctx.day) : null;
   if (k === 'task') {
     if (!p.date && (ctxDay || p.repeat !== 'none' || p.time)) p.date = ctxDay || new Date();
-  } else if (k === 'day-goal') {
+  } else if (k === 'day-goal' || k === 'note') {
     p.date = p.date || ctxDay || new Date();
   } else if (k === 'week-goal') {
     p.date = weekStartOf(p.date || (ctx.week ? parseLocal(ctx.week) : new Date()), weekStart());
@@ -57,6 +58,10 @@ export function createParsed(p, ctx = {}) {
     }
     const item = M.addTask({ title: p.title, date: p.dateKey, time: p.time, end: p.end, category: p.category, repeat: p.repeat, weekdays: p.weekdays, priority: p.priority, projectId });
     return { kind: 'task', item, where: p.dateKey ? dayLabel(p.date) : projectId ? M.findProject(projectId).title : 'Inbox' };
+  }
+  if (k === 'note') {
+    const item = M.addNote({ date: p.dateKey, text: p.title });
+    return { kind: 'note', item, where: `notes for ${dayLabel(p.date)}` };
   }
   if (k === 'day-goal' || k === 'week-goal') {
     const item = M.addGoal({ scope: k === 'day-goal' ? 'day' : 'week', date: p.dateKey, title: p.title, target: p.target });
@@ -89,6 +94,9 @@ function chips(p) {
     if (p.category) chip('#', p.category);
     if (p.project) chip('◆', p.project.title);
     if (p.newProject) chip('◆', `New project: ${p.newProject}`, 'new');
+  } else if (kind === 'note') {
+    chip('◷', dayLabel(p.date));
+    chip('✎', 'A note on that day, not a task', 'muted');
   } else if (kind === 'day-goal') {
     chip('◷', dayLabel(p.date));
     if (p.target > 1) chip('×', `${p.target} times`);
@@ -122,7 +130,7 @@ function render() {
       const p = resolveLine(l, ctxNow());
       return `<li><b>${esc(p.title || l)}</b>${chips(p)}</li>`;
     }).join('');
-    prev.innerHTML = `<div class="qa-multi"><span class="qa-count">${lines.length} ${kind === 'project' ? 'projects' : kind === 'task' ? 'tasks' : 'goals'}, one per line</span><ul>${shown}</ul>${lines.length > 8 ? `<span class="qa-count">and ${lines.length - 8} more</span>` : ''}</div>`;
+    prev.innerHTML = `<div class="qa-multi"><span class="qa-count">${lines.length} ${{ project: 'projects', task: 'tasks', note: 'notes' }[kind] || 'goals'}, one per line</span><ul>${shown}</ul>${lines.length > 8 ? `<span class="qa-count">and ${lines.length - 8} more</span>` : ''}</div>`;
   }
 }
 

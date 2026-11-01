@@ -243,6 +243,13 @@ export function parseQuick(text, { now = new Date(), projects = [], kind = 'task
     // "quoted" words are always kept as typed, e.g. Study for "SAT"
     if (/^".+"$/.test(tok)) { keep.push(tok.slice(1, -1)); i++; continue; }
 
+    // Notes keep their wording; only a date (today, fri, nov 12…) is taken out to say which day.
+    if (kind === 'note') {
+      const nd = parseDate(tokens, i, now);
+      if (nd && !out.date) { out.date = nd.date; i += nd.used; continue; }
+      keep.push(tok); i++; continue;
+    }
+
     // #category
     if (/^#[\w-]+$/.test(tok)) { out.category = tok.slice(1).toLowerCase(); i++; continue; }
 
@@ -316,7 +323,7 @@ export function parseQuick(text, { now = new Date(), projects = [], kind = 'task
   }
 
   // Drop dangling connector words left at the end, e.g. "Call mom on" after removing "friday".
-  while (keep.length && /^(on|at|by|for|due|every|in|from|and)$/i.test(keep[keep.length - 1])) keep.pop();
+  while (kind !== 'note' && keep.length && /^(on|at|by|for|due|every|in|from|and)$/i.test(keep[keep.length - 1])) keep.pop();
   out.title = keep.join(' ');
   if (out.title) out.title = out.title[0].toUpperCase() + out.title.slice(1);
   out.dateKey = out.date ? isoDate(out.date) : '';

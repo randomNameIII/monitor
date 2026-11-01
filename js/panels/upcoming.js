@@ -1,5 +1,6 @@
 import { registerPanel } from '../core/registry.js';
-import { occurrences, dayLabel, formatTime, formatTimeRange, startOfDay, addDays } from '../core/util.js';
+import { occurrences, dayLabel, formatTime, formatTimeRange, startOfDay, addDays, isoDate, parseLocal } from '../core/util.js';
+import { notesForDay } from '../core/planning.js';
 
 // Project color wins; otherwise a stable soft color per category name, so "school" is always the same tint.
 function tint(ev, projects) {
@@ -51,9 +52,12 @@ function mountColumns(ctx) {
         </li>`;
       }).join('');
 
+      const notes = s.showNotes ? notesForDay(ctx.data.notes, isoDate(day)) : [];
+      const noteHtml = notes.length ? `<ul class="upc-notes">${notes.map((n) => `<li>${ctx.esc(n.text)}</li>`).join('')}</ul>` : '';
       cols += `<section class="upc-col${i === 0 ? ' today' : ''}${weekend ? ' weekend' : ''}">
         <header><span class="upc-label">${label}</span><span class="upc-date">${date}</span></header>
-        ${items.length ? `<ol>${list}</ol><div class="upc-more" hidden></div>` : '<p class="upc-free">Nothing planned</p>'}
+        ${noteHtml}
+        ${items.length ? `<ol>${list}</ol><div class="upc-more" hidden></div>` : notes.length ? '' : '<p class="upc-free">Nothing planned</p>'}
       </section>`;
     }
     ctx.el.innerHTML = `<div class="upc" style="--n:${n}">${title(ctx)}<div class="upc-cols">${cols}</div></div>`;
@@ -115,6 +119,7 @@ registerPanel({
     { key: 'showPast', label: 'Keep finished and ticked-off items, dimmed', type: 'toggle', default: true, showIf: { layout: 'columns' } },
     { key: 'categories', label: 'Only these categories', type: 'text', default: '', placeholder: 'e.g. school, class (empty shows all)' },
     { key: 'hideDone', label: 'Hide tasks you’ve ticked off', type: 'toggle', default: true, showIf: { layout: 'list' } },
+    { key: 'showNotes', label: 'Show day notes', type: 'toggle', default: true },
     { key: 'showCategory', label: 'Show category tags', type: 'toggle', default: true },
     { key: 'hour24', label: '24-hour times', type: 'toggle', default: false },
   ],
@@ -128,29 +133,34 @@ registerPanel({
         from: now, days: s.days, categories: String(s.categories || '').split(','),
       }).filter((ev) => !(ev.done && s.hideDone)).slice(0, s.max);
 
-      if (!list.length) {
+      // Day notes show under their day, including days that have notes but no tasks.
+      const todayKey = isoDate(now);
+      const lastKey = list.length >= s.max ? list[list.length - 1].day : isoDate(addDays(now, s.days - 1));
+      const noteDays = s.showNotes ? (ctx.data.notes || []).filter((n) => n.date >= todayKey && n.date <= lastKey).map((n) => n.date) : [];
+      const dayKeys = [...new Set([...list.map((ev) => ev.day), ...noteDays])].sort();
+
+      if (!dayKeys.length) {
         ctx.el.innerHTML = `<div class="up">${title(ctx)}
           <div class="up-empty">Nothing in the next ${s.days} day${s.days === 1 ? '' : 's'}.</div></div>`;
         return;
       }
-      let html = '';
-      let lastDay = null;
-      for (const ev of list) {
-        const day = startOfDay(ev.at).getTime();
-        if (day !== lastDay) {
-          if (lastDay !== null) html += '</ol>';
-          html += `<div class="up-day">${dayLabel(ev.at, now)}</div><ol>`;
-          lastDay = day;
-        }
+      const row = (ev) => {
         const soon = !ev.allDay && ev.at - now < 3 * 3600 * 1000 && ev.at > now;
         const { hue, tag: label } = tint(ev, ctx.data.projects);
-        html += `<li class="${soon && !ev.done ? 'soon' : ''}${ev.done ? ' done' : ''}">
+        return `<li class="${soon && !ev.done ? 'soon' : ''}${ev.done ? ' done' : ''}">
           <span class="up-time">${ev.allDay ? 'All day' : formatTime(ev.at, s.hour24)}</span>
-          <span class="up-title">${ctx.esc(ev.title)}</span>
+          <span class="up-title">${ev.priority ? `<b class="upc-prio">${'!'.repeat(ev.priority)}</b>` : ''}${ctx.esc(ev.title)}</span>
           ${s.showCategory && label ? `<span class="up-cat" style="--h:${hue}">${ctx.esc(label)}</span>` : ''}
         </li>`;
+      };
+      let html = '';
+      for (const key of dayKeys) {
+        const notes = s.showNotes ? notesForDay(ctx.data.notes, key) : [];
+        html += `<div class="up-day">${dayLabel(parseLocal(key), now)}</div>`;
+        if (notes.length) html += `<ul class="up-notes">${notes.map((n) => `<li>${ctx.esc(n.text)}</li>`).join('')}</ul>`;
+        const rows = list.filter((x) => x.day === key);
+        if (rows.length) html += `<ol>${rows.map(row).join('')}</ol>`;
       }
-      html += '</ol>';
       ctx.el.innerHTML = `<div class="up">${title(ctx)}<div class="up-list">${html}</div></div>`;
     };
     ctx.every(60000, draw, { align: true });
@@ -162,6 +172,11 @@ registerPanel({
       mask-image: linear-gradient(to bottom, #000 85%, transparent); }
     .up-day { font-size: min(4.6cqh, 3.4cqw); color: var(--accent); font-weight: 600; margin-top: 1.4cqh; }
     .up-day:first-child { margin-top: 0; }
+    .up-notes, .upc-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3em; flex: none; }
+    .up .up-notes li, .upc .upc-notes li { display: block; color: var(--text); font-style: italic; padding: 0 0 0 .7em;
+      border-left: 2px solid var(--ember); line-height: 1.3; opacity: 1; text-decoration: none; }
+    .up .up-notes li { font-size: min(5cqh, 3.6cqw); }
+    .upc .upc-notes li { font-size: calc(var(--fs) * .92); }
     .up ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .8cqh; }
     .up li { display: grid; grid-template-columns: 5.2em 1fr auto; align-items: baseline; gap: 1em;
       font-size: min(5.4cqh, 3.9cqw); line-height: 1.3; }

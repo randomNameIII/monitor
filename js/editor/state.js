@@ -15,7 +15,7 @@ export const prefs = {
 };
 
 export const state = {
-  cfg: loadLocal() || defaultConfig(),
+  cfg: loadLocal() || normalize(defaultConfig()),
   selected: null,
   publishing: false,
   publishError: '',

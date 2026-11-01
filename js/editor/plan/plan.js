@@ -4,7 +4,7 @@
 
 import { state, onChange, undo, commit } from '../state.js';
 import { esc, isoDate, addDays, parseLocal, weekStartOf, formatTime, formatTimeRange, weekdaysLabel, dayLabel, occurrences, startOfDay, daysBetween } from '../../core/util.js';
-import { goalsForDay, goalsForWeek, isGoalDone, projectProgress, nextProjectTask, byOrder, categoryHue, daysUntil } from '../../core/planning.js';
+import { notesForDay, goalsForDay, goalsForWeek, isGoalDone, projectProgress, nextProjectTask, byOrder, categoryHue, daysUntil } from '../../core/planning.js';
 import { uid } from '../../core/config.js';
 import * as M from './model.js';
 import { parseQuick } from './parse.js';
@@ -104,6 +104,21 @@ function goalItem(g, kind) {
   </li>`;
 }
 
+// A day note: plain text on a day, no checkbox. Click to edit in place.
+function noteItem(n) {
+  if (inline?.zone === `editnote:${n.id}`) {
+    return `<li class="dnote editing"><input data-inline="editnote:${n.id}" value="${esc(inline.value ?? n.text)}" aria-label="Edit note"></li>`;
+  }
+  return `<li class="dnote${flash === n.id ? ' flash' : ''}" tabindex="0" data-drag="note" data-id="${n.id}" title="Day note: click to edit, right-click for options">${esc(n.text)}</li>`;
+}
+
+function notesBlock(key, { placeholder = 'Note for the day, e.g. Essay due' } = {}) {
+  const notes = notesForDay(state.cfg.data.notes, key);
+  const adding = inline?.zone === `note:${key}`;
+  if (!notes.length && !adding) return '';
+  return `<ul class="day-notes">${notes.map(noteItem).join('')}${adding ? `<li class="dnote editing"><input data-inline="note:${key}" value="${esc(inline.value || '')}" placeholder="${esc(placeholder)}" aria-label="New note"></li>` : ''}</ul>`;
+}
+
 function inlineBox(zone, placeholder) {
   if (inline?.zone !== zone) return '';
   return `<div class="inline-add"><input data-inline="${zone}" value="${esc(inline.value || '')}" placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}"></div>`;
@@ -154,19 +169,23 @@ function renderTimeline() {
     const goals = goalsForDay(state.cfg.data.goals, key);
     const gDone = goals.filter(isGoalDone).length;
     const showMonth = i === 0 || d.getDate() === 1;
-    days += `<section class="day${key === today ? ' today' : ''}${key < today ? ' past' : ''}${d.getDate() === 1 ? ' mstart' : ''}" style="grid-column:${i + 1}" data-drop data-accept="task day-goal week-goal" data-zone="day" data-day="${key}">
+    days += `<section class="day${key === today ? ' today' : ''}${key < today ? ' past' : ''}${d.getDate() === 1 ? ' mstart' : ''}" style="grid-column:${i + 1}" data-drop data-accept="task day-goal week-goal note" data-zone="day" data-day="${key}">
       <header class="day-head" data-act="day-menu">
         <span class="dow">${d.toLocaleDateString(undefined, { weekday: 'short' })}</span>
         <span class="dnum">${d.getDate()}</span>
         ${showMonth ? `<span class="dmon">${d.toLocaleDateString(undefined, { month: 'short' })}</span>` : ''}
         <span class="dspace"></span>
         ${goals.length ? `<span class="dgoals${gDone === goals.length ? ' all' : ''}" title="Daily goals done">${gDone}/${goals.length}</span>` : ''}
-        <button type="button" class="dg-add" data-act="inline" data-target="dgoal:${key}" title="Add a goal for this day">+ goal</button>
       </header>
+      ${notesBlock(key)}
       ${goals.length || inline?.zone === `dgoal:${key}` ? `<ul class="goal-list day-goals">${goals.map((g) => goalItem(g, 'day-goal')).join('')}</ul>${inlineBox(`dgoal:${key}`, 'Goal for the day')}` : ''}
       <ol class="tasks">${items.map((t) => taskCard(t, { day: key })).join('')}</ol>
       ${inlineBox(`day:${key}`, 'New task, e.g. Essay 3pm #school')}
-      ${addButton(`day:${key}`, 'Add')}
+      <div class="add-bar">
+        ${addButton(`day:${key}`, 'Add')}
+        <button type="button" class="add-row add-alt" data-act="inline" data-target="note:${key}" title="A note on this day that isn’t a task, e.g. Essay due">Note</button>
+        <button type="button" class="add-row add-alt" data-act="inline" data-target="dgoal:${key}" title="A goal for this day">Goal</button>
+      </div>
     </section>`;
   }
   weekEl.style.setProperty('--colw', `${colW}px`);
@@ -213,11 +232,12 @@ function renderMonth() {
     const goals = goalsForDay(state.cfg.data.goals, key);
     const gDone = goals.filter(isGoalDone).length;
     const out = d.getMonth() !== first.getMonth();
-    cells += `<section class="mday${out ? ' out' : ''}${key === today ? ' today' : ''}${key < today ? ' past' : ''}" data-drop data-accept="task day-goal week-goal" data-zone="day" data-day="${key}">
+    cells += `<section class="mday${out ? ' out' : ''}${key === today ? ' today' : ''}${key < today ? ' past' : ''}" data-drop data-accept="task day-goal week-goal note" data-zone="day" data-day="${key}">
       <header class="mday-head">
         <button type="button" class="mnum" data-act="open-day" data-day="${key}" title="Open this day">${d.getDate() === 1 ? d.toLocaleDateString(undefined, { month: 'short' }) + ' ' : ''}${d.getDate()}</button>
         ${goals.length ? `<span class="dgoals${gDone === goals.length ? ' all' : ''}" title="Goals for the day">${gDone}/${goals.length}</span>` : ''}
       </header>
+      ${notesBlock(key, { placeholder: 'Note' })}
       <ol class="tasks">${items.map((t) => miniTask(t, key)).join('')}</ol>
       <button type="button" class="mmore" data-act="open-day" data-day="${key}" hidden></button>
       ${inlineBox(`day:${key}`, 'New task')}
@@ -731,11 +751,34 @@ function inlineContext(zone) {
   if (type === 'project') return { kind: 'task', projectId: arg };
   if (type === 'inbox') return { kind: 'task' };
   if (type === 'week') return { kind: 'week-goal', week: isoDate(focusWeek) };
+  if (type === 'note') return { kind: 'note', day: arg };
   return { kind: 'day-goal', day: arg };
 }
 
 function submitInline(input, pasted = null) {
   const zone = input.dataset.inline;
+  // Editing an existing note: save (or delete if emptied) and close.
+  if (zone.startsWith('editnote:')) {
+    const id = zone.slice(9);
+    const text = input.value.trim();
+    inline = null;
+    if (!text) deleteWithUndo(M.findNote(id)?.text || 'note', () => M.deleteNote(id));
+    else if (text !== M.findNote(id)?.text) M.updateNote(id, { text });
+    else render();
+    return;
+  }
+  // Notes in a day's box are kept exactly as typed (no date parsing): one note per line.
+  if (zone.startsWith('note:')) {
+    const lines = pasted || cleanLines(input.value);
+    if (!lines.length) { inline = null; render(); return; }
+    const day = zone.slice(5);
+    let last = null;
+    M.batch(() => { for (const l of lines) last = M.addNote({ date: day, text: l }); });
+    flash = last?.id || null;
+    inline = { zone, value: '', focus: true };
+    render();
+    return;
+  }
   const lines = pasted || cleanLines(input.value);
   if (!lines.length) { inline = null; render(); return; }
   const ctx = inlineContext(zone);
@@ -900,6 +943,7 @@ function dayMenu(e, key) {
   openMenu(e, [
     { heading: dayLabel(parseLocal(key)) },
     { label: 'Add task', hint: 'Double-click', action: () => openInline(`day:${key}`) },
+    { label: 'Add note', action: () => openInline(`note:${key}`) },
     { label: 'Add goal for the day', action: () => openInline(`dgoal:${key}`) },
     { label: 'Quick add…', hint: 'N', action: () => openQuickAdd({ day: key }) },
     { label: 'Select everything on this day', action: () => setSelection([...weekEl.querySelectorAll(`.day[data-day="${key}"] [data-drag="task"], .day[data-day="${key}"] [data-drag="day-goal"]`)].map(keyOf)) },
@@ -948,7 +992,36 @@ function onClick(e) {
 
   if (item && selectionSize() > 1 && isSelected(item)) { clearSelection(); }
   if (item?.dataset.drag === 'task') { editTask(item, item.dataset.id, item.dataset.day || null); return; }
+  if (item?.dataset.drag === 'note') { editNote(item.dataset.id); return; }
   if (item && /goal$/.test(item.dataset.drag)) { editGoal(item, item.dataset.id); }
+}
+
+function editNote(id) {
+  const n = M.findNote(id);
+  if (!n) return;
+  closePopover();
+  inline = { zone: `editnote:${id}`, value: n.text, focus: true };
+  render();
+}
+
+function noteMenu(e, id) {
+  const n = M.findNote(id);
+  if (!n) return;
+  const d = parseLocal(n.date);
+  openMenu(e, [
+    { heading: 'Day note' },
+    { label: 'Edit', hint: 'Enter', action: () => editNote(id) },
+    { label: 'Make it a task', action: () => { M.batch(() => { M.addTask({ title: n.text, date: n.date }); M.deleteNote(id); }); toast('Turned into a task', false, { label: 'Undo', fn: undo }); } },
+    '-',
+    { label: 'Move to', items: [
+      { label: 'Day before', action: () => M.moveNote(id, { date: isoDate(addDays(d, -1)) }) },
+      { label: 'Next day', action: () => M.moveNote(id, { date: isoDate(addDays(d, 1)) }) },
+      { label: 'Same day next week', action: () => M.moveNote(id, { date: isoDate(addDays(d, 7)) }) },
+    ] },
+    { label: 'Copy to next week', action: () => M.addNote({ date: isoDate(addDays(d, 7)), text: n.text }) },
+    '-',
+    { label: 'Delete', hint: 'Del', danger: true, action: () => deleteWithUndo(n.text, () => M.deleteNote(id)) },
+  ]);
 }
 
 function onContext(e) {
@@ -964,6 +1037,7 @@ function onContext(e) {
     return goalMenu(e, item.dataset.id);
   }
   if (item?.dataset.drag === 'project') return projectMenu(e, item.dataset.id);
+  if (item?.dataset.drag === 'note') return noteMenu(e, item.dataset.id);
   if (day) return dayMenu(e, day.dataset.day);
   const zone = e.target.closest('[data-zone]')?.dataset.zone;
   if (zone === 'inbox') return openMenu(e, [{ label: 'Add task to inbox', action: () => openInline('inbox') }]);
@@ -983,6 +1057,12 @@ function onDblClick(e) {
 }
 
 function onDrop({ kind, id, src, zone, beforeId, el, copy }) {
+  if (kind === 'note') {
+    if (zone.zone !== 'day') return;
+    if (copy) { const n = M.findNote(id); if (n) M.addNote({ date: zone.day, text: n.text }); }
+    else M.moveNote(id, { date: zone.day, beforeId });
+    return;
+  }
   // Alt held while dropping: leave the originals and drop copies.
   if (copy && zone.zone === 'day') {
     const multi = selectionSize() > 1 && el && isSelected(el);
@@ -1077,6 +1157,10 @@ function onKey(e) {
       return;
     }
     if (/^[0-3]$/.test(e.key) && kind === 'task') { e.preventDefault(); M.updateTask(id, { priority: +e.key }); return; }
+    if (kind === 'note') {
+      if (e.key === 'Enter') { e.preventDefault(); editNote(id); return; }
+      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteWithUndo(M.findNote(id).text, () => M.deleteNote(id)); return; }
+    }
     if (e.key === 'Enter') {
       e.preventDefault();
       if (kind === 'task') editTask(item, id, item.dataset.day || null);
@@ -1163,7 +1247,7 @@ export function initPlan() {
   // Pasting a list into an inline box adds one item per line.
   root.addEventListener('paste', (e) => {
     const input = e.target.closest?.('[data-inline]');
-    if (!input) return;
+    if (!input || input.dataset.inline.startsWith('editnote:')) return;
     const lines = cleanLines(e.clipboardData?.getData('text') || '');
     if (lines.length > 1) { e.preventDefault(); submitInline(input, lines); }
   });
@@ -1174,6 +1258,12 @@ export function initPlan() {
   root.addEventListener('pointerleave', () => { hoverDay = null; hoverZone = null; });
   document.addEventListener('copy', onCopy);
   document.addEventListener('paste', onPaste);
+  // Clicking away from a note being edited saves it.
+  root.addEventListener('focusout', (e) => {
+    const input = e.target.closest?.('[data-inline^="editnote:"]');
+    if (!input) return;
+    setTimeout(() => { if (inline?.zone === input.dataset.inline && !root.querySelector(`[data-inline="${inline.zone}"]:focus`)) submitInline(input); }, 120);
+  });
   root.addEventListener('focusout', (e) => {
     const input = e.target.closest?.('[data-inline]');
     if (!input || input.value.trim()) return;

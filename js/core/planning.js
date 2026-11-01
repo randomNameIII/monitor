@@ -8,6 +8,7 @@
 //            Week goals use the first day of their week as `date`.
 //   projects [{ id, title, hue, due?, archived?, progress?, notes?, order? }]
 //            `progress` (0–100) is only used for projects that have no tasks.
+//   notes    [{ id, date, text, order? }]   short notes pinned to a day ("Essay due today"), not tasks
 
 import { isoDate, addDays, weekStartOf, parseLocal, daysBetween } from './util.js';
 
@@ -15,6 +16,11 @@ export const isGoalDone = (g) => (g.count || 0) >= (g.target || 1);
 
 export function byOrder(a, b) {
   return (a.order ?? 0) - (b.order ?? 0);
+}
+
+export function notesForDay(notes, day) {
+  const key = typeof day === 'string' ? day : isoDate(day);
+  return (notes || []).filter((n) => n.date === key).sort(byOrder);
 }
 
 export function goalsForDay(goals, day) {

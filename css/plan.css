@@ -199,6 +199,10 @@ kbd {
 }
 .day:hover .add-row, .side-block:hover .add-row, .proj .add-row, .add-row:focus-visible { opacity: 1; }
 .add-row:hover { color: var(--ui-accent); background: rgba(157, 180, 255, .07); }
+.add-bar { display: flex; align-items: center; }
+.add-bar .add-row:first-child { flex: 1; }
+.add-row.add-alt { font-weight: 600; padding: 7px 7px; opacity: 0; }
+.day:hover .add-row.add-alt, .add-row.add-alt:focus-visible { opacity: .9; }
 .inline-add input, .plan input, .plan textarea { user-select: text; -webkit-user-select: text; }
 .inline-add input {
   width: 100%; font-size: 13.5px; padding: 7px 9px; border-radius: 8px;
@@ -278,6 +282,23 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
 .drop-line::after { right: -4px; }
 .day.drop-over { background: rgba(157, 180, 255, .07); box-shadow: inset 0 0 0 1px rgba(157, 180, 255, .3); }
 .side-block.drop-over, .proj.drop-over { box-shadow: 0 0 0 2px var(--ui-accent); background: rgba(157, 180, 255, .05); }
+
+/* ---------- day notes: text on a day, not a task ---------- */
+.day-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; flex: none; }
+.dnote {
+  position: relative; padding: 4px 8px 4px 10px; border-radius: 6px; cursor: pointer; user-select: none;
+  font-size: 13px; font-style: italic; line-height: 1.35; color: var(--text); overflow-wrap: anywhere;
+  border-left: 2px solid var(--ember); background: rgba(255, 179, 138, .06);
+}
+.dnote:hover { background: rgba(255, 179, 138, .11); }
+.dnote:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 1px; }
+.dnote.editing { padding: 0; background: none; border-left: 0; }
+.dnote.editing input { font-style: italic; font-size: 13px; padding: 5px 8px; border-color: var(--ember); box-shadow: 0 0 0 3px rgba(255, 179, 138, .15); }
+.past:not(.today) .dnote { opacity: .6; }
+.mday .day-notes { gap: 2px; }
+.mday .dnote { font-size: 12px; padding: 1px 6px 1px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mday .dnote.editing input { font-size: 12px; padding: 3px 6px; }
+.dnote.drag-ghost { opacity: .95; }
 
 /* ---------- priority, steps, time ranges ---------- */
 .prio { font-weight: 800; margin-right: .35em; letter-spacing: -.04em; }

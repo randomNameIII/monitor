@@ -70,6 +70,9 @@ function sampleData(today, plus) {
     projects: [
       { id: project, title: 'Example: research paper', hue: 220, due: plus(21), archived: false },
     ],
+    notes: [
+      { id: uid(), date: plus(0), text: 'Example note: a reminder that isn’t a task' },
+    ],
   };
 }
 
@@ -85,12 +88,12 @@ export function normalize(cfg) {
     updatedAt: cfg.updatedAt || new Date().toISOString(),
     board: deepMerge(structuredClone(DEFAULT_BOARD), cfg.board || {}),
     panels: Array.isArray(cfg.panels) ? cfg.panels : [],
-    data: { events: [], goals: [], projects: [], ...(cfg.data || {}) },
+    data: { events: [], goals: [], projects: [], notes: [], ...(cfg.data || {}) },
   };
   out.panels = out.panels
     .filter((p) => p && p.type)
     .map((p) => ({ id: p.id || uid(), x: 0, y: 0, w: 3, h: 2, settings: {}, ...p }));
-  for (const k of ['events', 'goals', 'projects']) if (!Array.isArray(out.data[k])) out.data[k] = [];
+  for (const k of ['events', 'goals', 'projects', 'notes']) if (!Array.isArray(out.data[k])) out.data[k] = [];
   return out;
 }
 

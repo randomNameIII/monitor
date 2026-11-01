@@ -206,6 +206,40 @@ export function deleteGoal(id) {
   save();
 }
 
+/* ---------------- day notes ---------------- */
+
+const notesList = () => (data().notes ||= []);
+export const findNote = (id) => notesList().find((n) => n.id === id);
+
+export function addNote({ date, text }) {
+  const n = { id: uid(), date, text: String(text || '').trim() };
+  if (!n.text || !date) return null;
+  n.order = nextOrder(notesList().filter((x) => x.date === date));
+  notesList().push(n);
+  save();
+  return n;
+}
+
+export function updateNote(id, patch) {
+  const n = findNote(id);
+  if (!n) return;
+  Object.assign(n, patch);
+  save();
+}
+
+export function moveNote(id, { date, beforeId = null }) {
+  const n = findNote(id);
+  if (!n) return;
+  if (date) n.date = date;
+  reorderInto(notesList().filter((x) => x !== n && x.date === n.date), n, beforeId);
+  save();
+}
+
+export function deleteNote(id) {
+  data().notes = notesList().filter((n) => n.id !== id);
+  save();
+}
+
 /* ---------------- projects ---------------- */
 
 const HUES = [220, 160, 280, 30, 340, 190, 100, 250];
