@@ -7,6 +7,7 @@ registerPanel({
   description: 'A message or checklist you write from the editor.',
   defaultSize: { w: 4, h: 4 },
   minSize: { w: 2, h: 1 },
+  appearance: ['align', 'valign'],
   settings: [
     { key: 'title', label: 'Title', type: 'text', default: 'This week' },
     { key: 'body', label: 'Text', type: 'textarea', default: '[ ] Return library books\n[x] Email advisor\n[ ] Laundry on Sunday\n\nRemember: **drink water**.',
@@ -29,6 +30,14 @@ registerPanel({
       font-size: min(6cqh, 4.6cqw); mask-image: linear-gradient(to bottom, #000 85%, transparent); }
     .notes[data-size="small"] .notes-body { font-size: min(4.8cqh, 3.7cqw); }
     .notes[data-size="large"] .notes-body { font-size: min(8cqh, 6cqw); }
+    .panel[data-align="center"] .notes-body { text-align: center; }
+    .panel[data-align="right"] .notes-body { text-align: right; }
+    .panel[data-align="center"] .notes-body ul { list-style-position: inside; padding: 0; }
+    .panel[data-align="center"] .notes-body li.check { justify-content: center; margin-left: 0; }
+    .panel[data-align="right"] .notes-body li.check { justify-content: flex-end; margin-left: 0; }
+    .panel[data-valign] .notes-body { display: flex; flex-direction: column; }
+    .panel[data-valign="middle"] .notes-body { justify-content: center; mask-image: none; }
+    .panel[data-valign="bottom"] .notes-body { justify-content: flex-end; mask-image: none; }
     .notes-body p, .notes-body h4 { margin: 0; }
     .notes-body h4 { color: var(--accent); font-weight: 600; font-size: 1em; }
     .notes-body .gap { height: .6em; }

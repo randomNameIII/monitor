@@ -115,5 +115,14 @@ export function resolveSettings(def, saved = {}) {
     if (field.type === 'heading') continue;
     out[field.key] = field.default;
   }
-  return { ...out, ...saved };
+  const res = { ...out, ...saved };
+  // "checks" fields are { part: bool } maps; keep defaults for parts saved before they existed.
+  for (const field of def.settings || []) {
+    if (field.type !== 'checks') continue;
+    const map = { ...field.default };
+    // `legacy: { part: 'oldToggleKey' }` carries over a toggle saved before this field existed.
+    if (!saved?.[field.key]) for (const [part, old] of Object.entries(field.legacy || {})) if (saved?.[old] !== undefined) map[part] = !!saved[old];
+    res[field.key] = { ...map, ...(saved?.[field.key] || {}) };
+  }
+  return res;
 }

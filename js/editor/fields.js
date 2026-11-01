@@ -42,6 +42,28 @@ export function renderField(field, value, onInput) {
     return wrap;
   }
 
+  if (field.type === 'checks') {
+    // A row of on/off chips, for "Show: ☑ name ☑ date ☐ unit". Value is { key: bool }.
+    const cur = { ...(value || {}) };
+    wrap.append(h('div', { class: 'checks-label', id }, field.label));
+    const row = h('div', { class: 'checks', role: 'group', 'aria-labelledby': id });
+    for (const o of optionList(field)) {
+      const btn = h('button', {
+        type: 'button', class: `check-chip${cur[o.value] ? ' on' : ''}`, 'aria-pressed': cur[o.value] ? 'true' : 'false', 'data-part': o.value,
+        onClick: () => {
+          cur[o.value] = !cur[o.value];
+          btn.classList.toggle('on', cur[o.value]);
+          btn.setAttribute('aria-pressed', cur[o.value] ? 'true' : 'false');
+          onInput({ ...cur });
+        },
+      }, o.label);
+      row.append(btn);
+    }
+    wrap.append(row);
+    if (help) wrap.append(help);
+    return wrap;
+  }
+
   wrap.append(h('label', { for: id }, field.label));
   let input;
   switch (field.type) {

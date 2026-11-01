@@ -105,9 +105,14 @@ export function createBoard(stage, { editor = false } = {}) {
     el.className = 'panel';
     el.dataset.id = p.id;
     el.dataset.type = p.type;
+    const outer = document.createElement('div');
+    outer.className = 'panel-body';
+    // Panels draw into .panel-inner. It's scaled for the "Text size" option, while .panel-body
+    // stays the size container, so cq units keep measuring the real panel.
     const body = document.createElement('div');
-    body.className = 'panel-body';
-    el.appendChild(body);
+    body.className = 'panel-inner';
+    outer.appendChild(body);
+    el.appendChild(outer);
     stage.appendChild(el);
     const m = { el, body, def, key: null, inst: null, ctx: null };
     if (!def) {
@@ -118,6 +123,17 @@ export function createBoard(stage, { editor = false } = {}) {
     try { m.inst = def.mount(m.ctx) || null; }
     catch (e) { showError(body, e); }
     return m;
+  }
+
+  // Shared per-panel options: alignment, vertical position and text size.
+  function appearance(m, p) {
+    const align = p.align || p.settings?.align; // clocks saved their alignment in settings before
+    if (align && align !== 'default') m.el.dataset.align = align; else delete m.el.dataset.align;
+    if (p.valign && p.valign !== 'default') m.el.dataset.valign = p.valign; else delete m.el.dataset.valign;
+    const k = Number(p.scale) || 1;
+    const st = m.body.style;
+    if (k === 1) { st.width = st.height = st.transform = ''; }
+    else { st.width = st.height = `${100 / k}%`; st.transform = `scale(${k})`; }
   }
 
   function render(next) {
@@ -147,6 +163,7 @@ export function createBoard(stage, { editor = false } = {}) {
       });
       const style = p.style && p.style !== 'default' ? p.style : (def?.defaultStyle || b.panelStyle);
       m.el.dataset.style = style;
+      appearance(m, p);
     }
   }
 

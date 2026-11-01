@@ -23,13 +23,16 @@ registerPanel({
   usesData: true,
   settings: [
     { key: 'title', label: 'Title', type: 'text', default: '', placeholder: 'Leave empty for no title' },
-    { key: 'showDay', label: 'Show today’s goals', type: 'toggle', default: true },
-    { key: 'showWeek', label: 'Show this week’s goals', type: 'toggle', default: true },
+    { key: 'show', label: 'Show', type: 'checks', default: { day: true, week: true, headers: true, bar: true, summary: true, counts: true }, options: [
+      { value: 'day', label: 'Today’s goals' }, { value: 'week', label: 'This week’s goals' }, { value: 'headers', label: 'Section names' },
+      { value: 'bar', label: 'Progress bars' }, { value: 'summary', label: '“2 of 3”' }, { value: 'counts', label: 'Counts on goals (1/3)' },
+    ], legacy: { day: 'showDay', week: 'showWeek' } },
     { key: 'hideDone', label: 'Hide goals that are done', type: 'toggle', default: false },
   ],
 
   mount(ctx) {
     const s = ctx.settings;
+    const show = s.show;
     const draw = () => {
       const now = new Date();
       const filt = (list) => (s.hideDone ? list.filter((g) => !isGoalDone(g)) : list);
@@ -39,16 +42,16 @@ registerPanel({
         const done = list.filter(isGoalDone).length;
         const shown = filt(list);
         return `<section class="gl-sec">
-          <header><span>${label}</span>${list.length ? `<span class="gl-sum${done === list.length ? ' all' : ''}">${done} of ${list.length}</span>` : ''}</header>
-          ${list.length ? `<div class="gl-bar"><i style="width:${(done / list.length) * 100}%"></i></div>` : ''}
-          ${shown.length ? `<ul>${shown.map((g) => row(g, ctx.esc)).join('')}</ul>`
+          ${show.headers || (show.summary && list.length) ? `<header><span>${show.headers ? label : ''}</span>${show.summary && list.length ? `<span class="gl-sum${done === list.length ? ' all' : ''}">${done} of ${list.length}</span>` : ''}</header>` : ''}
+          ${show.bar && list.length ? `<div class="gl-bar"><i style="width:${(done / list.length) * 100}%"></i></div>` : ''}
+          ${shown.length ? `<ul${show.counts ? '' : ' class="no-n"'}>${shown.map((g) => row(g, ctx.esc)).join('')}</ul>`
             : `<p class="gl-empty">${list.length ? 'All done.' : 'No goals set.'}</p>`}
         </section>`;
       };
       ctx.el.innerHTML = `<div class="gl">
         ${s.title ? `<h3 class="panel-title">${ctx.esc(s.title)}</h3>` : ''}
-        ${s.showDay ? section('Today', day) : ''}
-        ${s.showWeek ? section('This week', week) : ''}
+        ${show.day ? section('Today', day) : ''}
+        ${show.week ? section('This week', week) : ''}
       </div>`;
     };
     ctx.every(60000, draw, { align: true });
@@ -77,6 +80,7 @@ registerPanel({
     .gl-pips i.on { background: var(--accent); border-color: var(--accent); }
     .gl li.done .gl-title { color: var(--text-faint); text-decoration: line-through; text-decoration-color: var(--line-strong); }
     .gl li.done .gl-pips i.on { background: #7fd6a4; border-color: #7fd6a4; }
+    .gl ul.no-n .gl-n { display: none; }
     .gl-empty { margin: 0; color: var(--text-faint); font-size: .9em; }
   `,
 });

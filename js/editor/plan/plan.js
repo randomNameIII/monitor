@@ -12,7 +12,7 @@ import { enableDrag, edgeScroller } from './drag.js';
 import { enableMarquee, paintSelection, clearSelection, toggleSelected, isSelected, selectedItems, selectionSize, setSelection, keyOf, onSelectionChange } from './select.js';
 import { openMenu, closeMenu } from './menu.js';
 import { closePopover } from './popover.js';
-import { editTask, editGoal, editProject, editCategory, editNoteDetails, deleteWithUndo } from './editors.js';
+import { editTask, editGoal, editProject, editCategory, editNoteDetails, deleteWithUndo, editDueDates, setDueDates, dueChoices } from './editors.js';
 import { openQuickAdd, setQuickAddHandler, isQuickAddOpen, resolveLine, createParsed, addLines } from './quickadd.js';
 import { cleanLines } from './editors.js';
 import { actionFor, openShortcuts, shortcutsOpen, hint } from './keys.js';
@@ -794,6 +794,22 @@ function bulkDelete() {
   toast(`Deleted ${n} item${n === 1 ? '' : 's'}`, false, { label: 'Undo', fn: undo });
 }
 
+// "Due date" submenu: quick picks, a date picker, or none.
+function dueItems(ids, anchor, current = null) {
+  return [
+    ...dueChoices().map((c) => ({ label: `${c.label}  ·  ${c.sub}`, checked: current === c.key, action: () => setDueDates(ids, c.key) })),
+    '-',
+    { label: 'Pick a date…', hint: hint('due'), action: () => editDueDates(anchor, ids) },
+    { label: 'No due date', checked: current === '', disabled: current === null ? false : !current, action: () => setDueDates(ids, '') },
+  ];
+}
+
+function bulkDue() {
+  const ids = selTasks().map((x) => x.id);
+  if (!ids.length) { toast('Select some tasks first', true); return; }
+  editDueDates($('selBar').querySelector('[data-act="sel-due"]') || $('selBar'), ids);
+}
+
 function selectionMenu(e) {
   const today = startOfDay(new Date());
   const cats = [...new Set(ev().map((x) => x.category).filter(Boolean))].sort();
@@ -823,6 +839,7 @@ function selectionMenu(e) {
       ...cats.map((c) => ({ label: c, swatch: catHue(c), action: () => bulkSet({ category: c }) })),
     ] },
     { label: 'Priority', disabled: !tasks, items: [[0, 'None'], [1, '!  Priority'], [2, '!!  High'], [3, '!!!  Urgent']].map(([v, l]) => ({ label: l, action: () => bulkSet({ priority: v }) })) },
+    { label: 'Due date', disabled: !tasks, items: dueItems(selTasks().map((x) => x.id), $('selBar')) },
     { label: 'Copy', hint: 'Ctrl+C', disabled: !tasks, action: () => document.execCommand('copy') },
     '-',
     { label: 'Clear selection', hint: 'Esc', action: () => { clearSelection(); } },
@@ -1003,6 +1020,7 @@ function taskMenu(e, id, day) {
       ...(cats.length ? [] : [{ label: 'Type #name when adding a task', disabled: true }]),
     ] },
     { label: 'Priority', items: [[0, 'None'], [1, '!  Priority'], [2, '!!  High'], [3, '!!!  Urgent']].map(([v, l]) => ({ label: l, checked: (t.priority || 0) === v, hint: v ? String(v) : '0', action: () => M.updateTask(id, { priority: v }) })) },
+    { label: 'Due date', items: dueItems([id], anchor, t.due) },
     { label: 'Duplicate', hint: hint('duplicate'), action: () => { M.duplicateTask(id); toast('Duplicated'); } },
     { label: 'Copy', hint: 'Ctrl+C', action: () => { anchor.focus?.(); document.execCommand('copy'); } },
     '-',
@@ -1088,6 +1106,7 @@ function onClick(e) {
   if (a === 'sel-clear') { clearSelection(); return; }
   if (a === 'sel-menu') { const r = act.getBoundingClientRect(); selectionMenu({ preventDefault() {}, target: act, clientX: r.left, clientY: r.bottom + 6, detail: e.detail }); return; }
   if (a === 'sel-done') { bulkDone(); return; }
+  if (a === 'sel-due') { bulkDue(); return; }
   if (a === 'sel-delete') { bulkDelete(); return; }
   if (!item && !act && selectionSize()) { clearSelection(); return; }
   if (item && selectionSize() && !isSelected(item) && a !== 'tick' && a !== 'goal-bump') clearSelection();
@@ -1357,6 +1376,11 @@ function runAction(id) {
       else if (it.kind === 'project') editProject(it.el, it.id);
       return true;
     case 'duplicate': duplicateItems(); return true;
+    case 'due':
+      if (multi) bulkDue();
+      else if (it.kind === 'task') editDueDates(it.el, [it.id]);
+      else return false;
+      return true;
     case 'delete':
       if (multi) bulkDelete();
       else if (it.kind === 'task') {

@@ -217,6 +217,22 @@ function renderInspector() {
     { value: 'default', label: `Board default (${def.defaultStyle || b.panelStyle})` },
     { value: 'card', label: 'Card' }, { value: 'outline', label: 'Outline' }, { value: 'bare', label: 'No background' },
   ] }, p.style || 'default', (v) => { p.style = v; commit('style'); }));
+  const can = def.appearance || [];
+  if (can.includes('align')) {
+    pos.append(segmented('Alignment', [['default', 'Default'], ['left', 'Left'], ['center', 'Center'], ['right', 'Right']],
+      p.align || p.settings?.align || 'default', (v) => {
+        p.align = v;
+        if (p.settings?.align) { p.settings = { ...p.settings }; delete p.settings.align; }
+        commit('style');
+      }));
+  }
+  if (can.includes('valign')) {
+    pos.append(segmented('Vertical position', [['default', 'Default'], ['top', 'Top'], ['middle', 'Middle'], ['bottom', 'Bottom']],
+      p.valign || 'default', (v) => { p.valign = v; commit('style'); }));
+  }
+  pos.append(renderField({ type: 'range', label: 'Text size', min: 0.6, max: 1.6, step: 0.05, format: (v) => `${Math.round(v * 100)}%`,
+    help: 'Bigger text wraps sooner; anything that no longer fits is cut off.' },
+  Number(p.scale) || 1, (v) => { p.scale = Math.abs(v - 1) < 0.001 ? undefined : v; commit('style'); }));
 
   const grid = h('div', { class: 'pos-grid' });
   for (const [k, label, max] of [['x', 'Column', b.cols], ['y', 'Row', b.rows], ['w', 'Width', b.cols], ['h', 'Height', b.rows]]) {
@@ -233,6 +249,19 @@ function renderInspector() {
   inspector.append(h('div', { class: 'insp-actions' },
     h('button', { type: 'button', class: 'btn ghost', onClick: () => duplicate(p) }, 'Duplicate'),
     deleteBtn(p)));
+}
+
+// A small row of buttons, one of which is pressed.
+function segmented(label, options, value, onPick) {
+  const row = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': label });
+  const draw = (v) => {
+    for (const b of row.children) { const on = b.dataset.v === v; b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false'); }
+  };
+  for (const [v, text] of options) {
+    row.append(h('button', { type: 'button', role: 'radio', 'data-v': v, onClick: () => { draw(v); onPick(v); } }, text));
+  }
+  draw(value);
+  return h('div', { class: 'field field-seg' }, h('div', { class: 'checks-label' }, label), row);
 }
 
 function deleteBtn(p) {

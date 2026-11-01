@@ -508,6 +508,13 @@ body.has-selbar .toast { bottom: 96px; }
 .pf.hidden { display: none; }
 .pf-wide { grid-column: 1 / -1; }
 .pf-clear { font-size: 12px; font-weight: 600; }
+.pop-head { font: 700 14px var(--font-ui); color: var(--text); }
+.due-quick { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.due-q { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 7px 10px; border-radius: 8px; cursor: pointer;
+  background: var(--ui-raised); border: 1px solid var(--ui-border); color: var(--text); font: 600 13px var(--font-ui); text-align: left; }
+.due-q span { font-weight: 500; font-size: 11.5px; color: var(--text-faint); }
+.due-q:hover, .due-q:focus-visible { border-color: var(--ember); }
+.due-q.on { border-color: var(--ember); background: rgba(255, 179, 138, .1); }
 .pop-actions { display: flex; gap: 8px; align-items: center; padding-top: 4px; border-top: 1px solid var(--ui-border); padding-top: 12px; }
 .stepper { display: flex; align-items: center; border: 1px solid var(--ui-border-strong); border-radius: 8px; overflow: hidden; height: 33px; }
 .stepper button { appearance: none; border: 0; background: var(--ui-raised); color: var(--text); width: 34px; height: 100%; font-size: 16px; cursor: pointer; }
@@ -549,6 +556,17 @@ body.has-selbar .toast { bottom: 96px; }
 .qa-count { font-size: 12.5px; color: var(--text-faint); font-weight: 600; }
 .qa-chip.prio i { color: var(--ember); font-weight: 800; }
 .qa .qa-input:focus { border-color: var(--ui-accent); box-shadow: 0 0 0 3px rgba(157, 180, 255, .18); }
+.qa-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: -4px; }
+.qa-tools[hidden] { display: none; }
+.qa-due-btn { font: 600 12.5px var(--font-ui); color: var(--text-dim); background: transparent; border: 1px dashed var(--ui-border-strong);
+  border-radius: 99px; padding: 4px 11px; cursor: pointer; }
+.qa-due-btn:hover, .qa-due-btn[aria-expanded="true"] { color: var(--text); border-color: var(--ember); }
+.qa-due-btn.set { color: var(--ember); border-style: solid; border-color: rgba(255, 179, 138, .45); background: rgba(255, 179, 138, .08); }
+.qa-due-x { font: 600 15px/1 var(--font-ui); color: var(--text-faint); background: none; border: 0; cursor: pointer; padding: 2px 4px; margin-left: -4px; }
+.qa-due-x:hover { color: var(--text); }
+.qa-tools-hint { font-size: 12px; color: var(--text-faint); }
+.qa-due { flex-basis: 100%; display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; padding: 4px 0 2px; }
+.qa-due .qa-due-date { padding: 6px 8px; font-size: 13px; }
 .qa-preview { display: flex; flex-wrap: wrap; gap: 6px; min-height: 28px; }
 .qa-chip {
   display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;

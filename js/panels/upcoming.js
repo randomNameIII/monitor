@@ -65,9 +65,9 @@ function mountColumns(ctx) {
         const { hue, tag: label } = tint(ev, ctx.data.projects);
         const tag = s.showCategory && label ? `<span class="upc-cat">${ctx.esc(label)}</span>` : '';
         return `<li class="${done ? 'done' : ''}${soon ? ' soon' : ''}${ev.allDay ? ' allday' : ''}" style="--h:${hue}">
-          ${ev.allDay && !tag ? '' : `<span class="upc-time">${ev.allDay ? '' : formatTimeRange(ev.day, ev.time, ev.end, s.hour24)}${tag}</span>`}
-          <span class="upc-title">${ev.priority ? `<b class="upc-prio">${'!'.repeat(ev.priority)}</b>` : ''}${ctx.esc(ev.title)}</span>
-          ${ev.due ? `<span class="upc-due">${dueTag(ev)}</span>` : ''}
+          ${(ev.allDay || !s.show.time) && !tag ? '' : `<span class="upc-time">${ev.allDay || !s.show.time ? '' : formatTimeRange(ev.day, ev.time, ev.end, s.hour24)}${tag}</span>`}
+          <span class="upc-title">${ev.priority && s.show.priority ? `<b class="upc-prio">${'!'.repeat(ev.priority)}</b>` : ''}${ctx.esc(ev.title)}</span>
+          ${ev.due && s.show.due ? `<span class="upc-due">${dueTag(ev)}</span>` : ''}
         </li>`;
       }).join('');
 
@@ -138,14 +138,18 @@ registerPanel({
     { key: 'showPast', label: 'Keep finished and ticked-off items, dimmed', type: 'toggle', default: true, showIf: { layout: 'columns' } },
     { key: 'categories', label: 'Only these categories', type: 'text', default: '', placeholder: 'e.g. school, class (empty shows all)' },
     { key: 'hideDone', label: 'Hide tasks you’ve ticked off', type: 'toggle', default: true, showIf: { layout: 'list' } },
-    { key: 'showNotes', label: 'Show day notes', type: 'toggle', default: true },
-    { key: 'showCategory', label: 'Show category tags', type: 'toggle', default: true },
+    { key: 'show', label: 'Show', type: 'checks', default: { notes: true, time: true, category: true, due: true, priority: true }, options: [
+      { value: 'notes', label: 'Day notes' }, { value: 'time', label: 'Times' }, { value: 'category', label: 'Category tags' },
+      { value: 'due', label: 'Due dates' }, { value: 'priority', label: 'Priority marks (!!)' },
+    ], legacy: { notes: 'showNotes', category: 'showCategory' } },
     { key: 'hour24', label: '24-hour times', type: 'toggle', default: false },
   ],
 
   mount(ctx) {
-    if (ctx.settings.layout === 'columns') return mountColumns(ctx);
     const s = ctx.settings;
+    s.showNotes = s.show.notes;
+    s.showCategory = s.show.category;
+    if (s.layout === 'columns') return mountColumns(ctx);
     const draw = () => {
       colors = ctx.data.categoryColors || null;
       const now = new Date();
@@ -168,8 +172,8 @@ registerPanel({
         const soon = !ev.allDay && ev.at - now < 3 * 3600 * 1000 && ev.at > now;
         const { hue, tag: label } = tint(ev, ctx.data.projects);
         return `<li class="${soon && !ev.done ? 'soon' : ''}${ev.done ? ' done' : ''}">
-          <span class="up-time">${ev.allDay ? '' : formatTime(ev.at, s.hour24)}</span>
-          <span class="up-title">${ev.priority ? `<b class="upc-prio">${'!'.repeat(ev.priority)}</b>` : ''}${ctx.esc(ev.title)} ${dueTag(ev)}</span>
+          ${s.show.time ? `<span class="up-time">${ev.allDay ? '' : formatTime(ev.at, s.hour24)}</span>` : ''}
+          <span class="up-title">${ev.priority && s.show.priority ? `<b class="upc-prio">${'!'.repeat(ev.priority)}</b>` : ''}${ctx.esc(ev.title)} ${s.show.due ? dueTag(ev) : ''}</span>
           ${s.showCategory && label ? `<span class="up-cat" style="--h:${hue}">${ctx.esc(label)}</span>` : ''}
         </li>`;
       };
@@ -181,7 +185,7 @@ registerPanel({
         const rows = list.filter((x) => x.day === key);
         if (rows.length) html += `<ol>${rows.map(row).join('')}</ol>`;
       }
-      ctx.el.innerHTML = `<div class="up">${title(ctx)}<div class="up-list">${html}</div></div>`;
+      ctx.el.innerHTML = `<div class="up${s.show.time ? '' : ' no-time'}">${title(ctx)}<div class="up-list">${html}</div></div>`;
     };
     ctx.every(60000, draw, { align: true });
   },
@@ -216,6 +220,8 @@ registerPanel({
     .up li.done .up-title { text-decoration: line-through; }
     .up-empty { color: var(--text-faint); font-size: min(5.4cqh, 3.9cqw); }
     @container (max-width: 380px) { .up li { grid-template-columns: 5.2em 1fr; } .up-cat { display: none; } }
+    .up.no-time li { grid-template-columns: 1fr auto; }
+    @container (max-width: 380px) { .up.no-time li { grid-template-columns: 1fr; } }
 
     /* Columns layout. Sizes divide the panel width by the number of days (--n). */
     .upc { height: 100%; display: flex; flex-direction: column; gap: 3cqh;

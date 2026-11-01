@@ -14,6 +14,9 @@ export function registerPanel(def) {
     minSize: { w: 1, h: 1 },
     settings: [],
     usesData: false,
+    // Which shared Appearance options the panel's CSS responds to: 'align' (left/center/right)
+    // and 'valign' (top/middle/bottom). Text size works for every panel.
+    appearance: [],
     ...def,
   });
   // Panels may ship their own CSS so a new panel stays a single file.

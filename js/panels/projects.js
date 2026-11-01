@@ -16,12 +16,16 @@ registerPanel({
     { key: 'order', label: 'Order', type: 'select', default: 'due', options: [
       { value: 'due', label: 'Soonest due first' }, { value: 'manual', label: 'Same as the Plan tab' }, { value: 'progress', label: 'Least done first' },
     ] },
-    { key: 'showNext', label: 'Show the next task', type: 'toggle', default: true },
+    { key: 'show', label: 'Show', type: 'checks', default: { pct: true, bar: true, tasks: true, due: true, next: true }, options: [
+      { value: 'pct', label: 'Percent' }, { value: 'bar', label: 'Progress bar' }, { value: 'tasks', label: '“3/8 tasks”' },
+      { value: 'due', label: 'Days left' }, { value: 'next', label: 'Next task' },
+    ], legacy: { next: 'showNext' } },
     { key: 'hideFinished', label: 'Hide finished projects', type: 'toggle', default: true },
   ],
 
   mount(ctx) {
     const s = ctx.settings;
+    const show = s.show;
     const draw = () => {
       const events = ctx.data.events || [];
       let list = (ctx.data.projects || []).filter((p) => !p.archived)
@@ -39,11 +43,12 @@ registerPanel({
       const rows = list.map(({ p, prog }) => {
         const d = p.due ? daysUntil(p.due) : null;
         const due = d == null ? '' : d < 0 ? `<span class="late">${-d}d late</span>` : d === 0 ? '<span class="late">Due today</span>' : `${d}d left`;
-        const next = s.showNext ? nextProjectTask(events, p.id) : null;
+        const next = show.next ? nextProjectTask(events, p.id) : null;
+        const meta = [show.tasks && !prog.manual ? `${prog.done}/${prog.total} tasks` : '', show.due ? due : ''].filter(Boolean).join(' · ');
         return `<li style="--h:${p.hue}">
-          <div class="pj-top"><span class="pj-name">${ctx.esc(p.title)}</span><span class="pj-pct">${prog.pct}%</span></div>
-          <div class="pj-bar"><i style="width:${prog.pct}%"></i></div>
-          <div class="pj-meta">${[prog.manual ? '' : `${prog.done}/${prog.total} tasks`, due].filter(Boolean).join(' · ')}${next ? `<span class="pj-next">Next: ${ctx.esc(next.title)}</span>` : ''}</div>
+          <div class="pj-top"><span class="pj-name">${ctx.esc(p.title)}</span>${show.pct ? `<span class="pj-pct">${prog.pct}%</span>` : ''}</div>
+          ${show.bar ? `<div class="pj-bar"><i style="width:${prog.pct}%"></i></div>` : ''}
+          ${meta || next ? `<div class="pj-meta">${meta}${next ? `<span class="pj-next">Next: ${ctx.esc(next.title)}</span>` : ''}</div>` : ''}
         </li>`;
       }).join('');
       ctx.el.innerHTML = `<div class="pj">${s.title ? `<h3 class="panel-title">${ctx.esc(s.title)}</h3>` : ''}<ul>${rows}</ul></div>`;

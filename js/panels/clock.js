@@ -1,12 +1,20 @@
 import { registerPanel } from '../core/registry.js';
 import { pad } from '../core/util.js';
 
-function parts(tz) {
+const DATE = {
+  long: { weekday: 'long', month: 'long', day: 'numeric' },
+  short: { weekday: 'short', month: 'short', day: 'numeric' },
+  numeric: { month: 'numeric', day: 'numeric' },
+  weekday: { weekday: 'long' },
+};
+
+function parts(tz, fmt = 'long') {
   const now = new Date();
+  const opts = DATE[fmt] || DATE.long;
   if (!tz) {
     return {
       h: now.getHours(), m: now.getMinutes(), s: now.getSeconds(),
-      date: now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }),
+      date: now.toLocaleDateString(undefined, opts),
     };
   }
   try {
@@ -16,10 +24,10 @@ function parts(tz) {
     const get = (t) => Number(f.find((p) => p.type === t)?.value);
     return {
       h: get('hour'), m: get('minute'), s: get('second'),
-      date: now.toLocaleDateString(undefined, { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }),
+      date: now.toLocaleDateString(undefined, { timeZone: tz, ...opts }),
     };
   } catch {
-    return { ...parts(''), bad: true };
+    return { ...parts('', fmt), bad: true };
   }
 }
 
@@ -30,44 +38,51 @@ registerPanel({
   defaultSize: { w: 6, h: 4 },
   minSize: { w: 2, h: 1 },
   defaultStyle: 'bare',
+  appearance: ['align', 'valign'],
   settings: [
     { key: 'hour24', label: '24-hour time', type: 'toggle', default: false },
-    { key: 'seconds', label: 'Show seconds', type: 'toggle', default: false },
-    { key: 'showDate', label: 'Show date', type: 'toggle', default: true },
-    { key: 'dayProgress', label: 'Show how much of the day has passed', type: 'toggle', default: true },
-    { key: 'align', label: 'Alignment', type: 'select', default: 'left', options: ['left', 'center', 'right'] },
+    { key: 'show', label: 'Show', type: 'checks', default: { seconds: false, ampm: true, date: true, progress: true, label: true }, options: [
+      { value: 'seconds', label: 'Seconds' }, { value: 'ampm', label: 'am/pm' }, { value: 'date', label: 'Date' },
+      { value: 'progress', label: 'Bar for how much of the day has passed' }, { value: 'label', label: 'Label' },
+    ], legacy: { seconds: 'seconds', date: 'showDate', progress: 'dayProgress' } },
+    { key: 'dateFormat', label: 'Date style', type: 'select', default: 'long', options: [
+      { value: 'long', label: 'Sunday, November 1' }, { value: 'short', label: 'Sun, Nov 1' }, { value: 'numeric', label: '11/1' }, { value: 'weekday', label: 'Sunday' },
+    ] },
     { key: 'timezone', label: 'Time zone', type: 'text', default: '', placeholder: 'Leave empty for this device, or e.g. Asia/Tokyo' },
     { key: 'label', label: 'Label', type: 'text', default: '', placeholder: 'e.g. Tokyo' },
   ],
 
   mount(ctx) {
     const s = ctx.settings;
+    const show = s.show;
     ctx.el.innerHTML = `
-      <div class="clock" data-align="${ctx.esc(s.align)}">
+      <div class="clock">
         <div class="clock-time"><span class="hm"></span><span class="sec"></span><span class="ampm"></span></div>
-        ${s.showDate ? '<div class="clock-date"></div>' : ''}
-        ${s.dayProgress ? '<div class="clock-day" aria-hidden="true"><i></i></div>' : ''}
-        ${s.label ? `<div class="clock-label">${ctx.esc(s.label)}</div>` : ''}
+        ${show.date ? '<div class="clock-date"></div>' : ''}
+        ${show.progress ? '<div class="clock-day" aria-hidden="true"><i></i></div>' : ''}
+        ${s.label && show.label ? `<div class="clock-label">${ctx.esc(s.label)}</div>` : ''}
       </div>`;
     const $ = (sel) => ctx.el.querySelector(sel);
     const hm = $('.hm'), sec = $('.sec'), ampm = $('.ampm'), date = $('.clock-date'), bar = $('.clock-day i');
 
     const tick = () => {
-      const p = parts(s.timezone);
+      const p = parts(s.timezone, s.dateFormat);
       let h = p.h;
-      if (!s.hour24) { ampm.textContent = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; }
+      if (!s.hour24) { if (show.ampm) ampm.textContent = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; }
       hm.textContent = `${s.hour24 ? pad(h) : h}:${pad(p.m)}`;
-      if (s.seconds) sec.textContent = `:${pad(p.s)}`;
+      if (show.seconds) sec.textContent = `:${pad(p.s)}`;
       if (date) date.textContent = p.bad ? `Unknown time zone “${s.timezone}”` : p.date;
       if (bar) bar.style.width = `${((p.h * 60 + p.m) / 1440) * 100}%`;
     };
-    ctx.every(s.seconds ? 1000 : 60000, tick, { align: true });
+    ctx.every(show.seconds ? 1000 : 60000, tick, { align: true });
   },
 
   css: `
     .clock { height: 100%; display: flex; flex-direction: column; justify-content: center; gap: 2cqh; }
-    .clock[data-align="center"] { align-items: center; text-align: center; }
-    .clock[data-align="right"] { align-items: flex-end; text-align: right; }
+    .panel[data-align="center"] .clock { align-items: center; text-align: center; }
+    .panel[data-align="right"] .clock { align-items: flex-end; text-align: right; }
+    .panel[data-valign="top"] .clock { justify-content: flex-start; }
+    .panel[data-valign="bottom"] .clock { justify-content: flex-end; }
     .clock-time {
       font-family: var(--font-display); font-weight: 300; line-height: .82;
       font-variation-settings: "SOFT" 100, "opsz" 144;

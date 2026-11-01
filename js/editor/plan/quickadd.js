@@ -7,10 +7,10 @@ import * as M from './model.js';
 import { state, undo } from '../state.js';
 import { esc, isoDate, parseLocal, weekStartOf, formatTimeRange, weekdaysLabel, dayLabel } from '../../core/util.js';
 import { toast } from '../ui.js';
-import { cleanLines } from './editors.js';
+import { cleanLines, dueChoices } from './editors.js';
 
 const KINDS = [
-  { id: 'task', label: 'Task', hint: 'Lab report fri 5pm #school @project !!' },
+  { id: 'task', label: 'Task', hint: 'Lab report thu 5pm due fri #school @project !!' },
   { id: 'note', label: 'Day note', hint: 'Essay due fri · Winter break dec 18 - jan 12 · Trash day every tue' },
   { id: 'day-goal', label: 'Daily goal', hint: 'Read 20 pages tomorrow' },
   { id: 'week-goal', label: 'Weekly goal', hint: 'Go to the gym 3x' },
@@ -22,6 +22,8 @@ let el = null;
 let opts = {};
 let kind = 'task';
 let onAdded = () => {};
+let pickedDue = ''; // due date chosen with the ⚑ Due date button; applies to every line
+let dueOpen = false;
 
 export function setQuickAddHandler(fn) { onAdded = fn; }
 
@@ -35,6 +37,11 @@ export function resolveLine(text, ctx = {}) {
   const k = ctx.kind || 'task';
   const p = parseQuick(text, { projects: state.cfg.data.projects.filter((x) => !x.archived), kind: k });
   const ctxDay = ctx.day ? parseLocal(ctx.day) : null;
+  if (ctx.due && (k === 'task' || k === 'project')) {
+    p.due = parseLocal(ctx.due);
+    p.dueKey = ctx.due;
+    if (k === 'task' && !p.date) p.date = p.due;
+  }
   if (k === 'task') {
     if (!p.date && (ctxDay || p.repeat !== 'none' || p.time)) p.date = ctxDay || new Date();
   } else if (k === 'day-goal' || k === 'note') {
@@ -115,10 +122,34 @@ function chips(p) {
   return out.join('');
 }
 
-const ctxNow = () => ({ kind, day: opts.day, week: opts.week, projectId: opts.projectId });
+const ctxNow = () => ({ kind, day: opts.day, week: opts.week, projectId: opts.projectId, due: pickedDue });
+
+const dueLabel = (key) => parseLocal(key).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+
+// The "⚑ Due date" button under the box, and the little picker it opens.
+function renderDue() {
+  const box = el.querySelector('.qa-tools');
+  const on = kind === 'task' || kind === 'project';
+  box.hidden = !on;
+  if (!on) return;
+  box.innerHTML = `
+    <button type="button" class="qa-due-btn${pickedDue ? ' set' : ''}" data-due-toggle aria-expanded="${dueOpen}">⚑ ${pickedDue ? `Due ${esc(dueLabel(pickedDue))}` : 'Due date'}</button>
+    ${pickedDue ? '<button type="button" class="qa-due-x" data-due-clear aria-label="Remove the due date">×</button>' : ''}
+    <span class="qa-tools-hint">${pickedDue ? (cleanLines(el.querySelector('.qa-input').value).length > 1 ? 'for every line' : '') : 'or type “due fri”'}</span>
+    ${dueOpen ? `<div class="qa-due">${dueChoices().map((c) => `<button type="button" class="due-q${c.key === pickedDue ? ' on' : ''}" data-due="${c.key}"><b>${c.label}</b><span>${esc(c.sub)}</span></button>`).join('')}
+      <input type="date" class="qa-due-date" value="${esc(pickedDue)}" aria-label="Due date"></div>` : ''}`;
+}
+
+function setPickedDue(key) {
+  pickedDue = key;
+  dueOpen = false;
+  render();
+  el.querySelector('.qa-input').focus();
+}
 
 function render() {
   const k = KINDS.find((x) => x.id === kind);
+  renderDue();
   el.querySelectorAll('.qa-kind').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.kind === kind)));
   const input = el.querySelector('.qa-input');
   input.placeholder = k.hint;
@@ -127,7 +158,7 @@ function render() {
   const lines = cleanLines(input.value);
   const prev = el.querySelector('.qa-preview');
   if (!lines.length) {
-    prev.innerHTML = '<span class="qa-chip muted">Type a title. Dates, times, #categories, @projects and ! priority are picked up as you type. Paste a list to add several.</span>';
+    prev.innerHTML = `<span class="qa-chip muted">Type a title. Dates, times, ${kind === 'task' ? 'due dates (“due fri”), ' : ''}#categories, @projects and ! priority are picked up as you type. Paste a list to add several.</span>`;
   } else if (lines.length === 1) {
     prev.innerHTML = chips(resolveLine(lines[0], ctxNow()));
   } else {
@@ -174,6 +205,8 @@ export function openQuickAdd(o = {}) {
   closeQuickAdd();
   opts = { ...o, restoreFocus: document.activeElement };
   kind = o.kind || 'task';
+  pickedDue = o.due || '';
+  dueOpen = false;
   el = document.createElement('div');
   el.className = 'qa-backdrop';
   el.innerHTML = `
@@ -182,8 +215,9 @@ export function openQuickAdd(o = {}) {
         ${KINDS.map((k) => `<button type="button" class="qa-kind" data-kind="${k.id}">${k.label}</button>`).join('')}
       </div>
       <textarea class="qa-input" rows="1" autocomplete="off" spellcheck="false" aria-label="Title"></textarea>
+      <div class="qa-tools"></div>
       <div class="qa-preview" aria-live="polite"></div>
-      <div class="qa-help"><span><kbd>Enter</kbd> add</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> add another</span><span><kbd>Tab</kbd> switch type</span><span><kbd>Esc</kbd> close</span></div>
+      <div class="qa-help"><span><kbd>Enter</kbd> add</span><span><kbd>Alt</kbd>+<kbd>D</kbd> due date</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> add another</span><span><kbd>Tab</kbd> switch type</span><span><kbd>Esc</kbd> close</span></div>
     </div>`;
   document.body.appendChild(el);
   const input = el.querySelector('.qa-input');
@@ -194,6 +228,18 @@ export function openQuickAdd(o = {}) {
     el.querySelector('.qa-help').insertAdjacentHTML('afterbegin', `<span>Adding to ${esc(pr?.title || '')}</span>`);
   }
   el.addEventListener('pointerdown', (e) => { if (e.target === el) closeQuickAdd(); });
+  const tools = el.querySelector('.qa-tools');
+  tools.addEventListener('click', (e) => {
+    if (e.target.closest('[data-due-toggle]')) { dueOpen = !dueOpen; renderDue(); (dueOpen ? tools.querySelector('.due-q') : input)?.focus(); return; }
+    if (e.target.closest('[data-due-clear]')) { setPickedDue(''); return; }
+    const q = e.target.closest('[data-due]');
+    if (q) setPickedDue(q.dataset.due);
+  });
+  tools.addEventListener('change', (e) => { if (e.target.matches('.qa-due-date') && e.target.value) setPickedDue(e.target.value); });
+  tools.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); dueOpen = false; renderDue(); input.focus(); }
+    else if (e.key === 'Enter' && e.target.matches('.qa-due-date') && e.target.value) { e.preventDefault(); setPickedDue(e.target.value); }
+  });
   el.querySelectorAll('.qa-kind').forEach((b) => b.addEventListener('click', () => { kind = b.dataset.kind; render(); input.focus(); }));
   // On Linux a middle-click also pastes the current selection; ignore that paste when we were opened by one.
   const openedAt = Date.now();
@@ -202,6 +248,9 @@ export function openQuickAdd(o = {}) {
   input.addEventListener('input', render);
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); add(e.shiftKey); }
+    else if (e.altKey && (e.key === 'd' || e.key === 'D' || e.code === 'KeyD') && (kind === 'task' || kind === 'project')) {
+      e.preventDefault(); dueOpen = !dueOpen; renderDue(); if (dueOpen) tools.querySelector('.due-q')?.focus();
+    }
     else if (e.key === 'Escape') { e.preventDefault(); closeQuickAdd(); }
     else if (e.key === 'Tab') {
       e.preventDefault();

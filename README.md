@@ -14,9 +14,9 @@ It's a plain static site (HTML, CSS and JavaScript modules, no build step), so G
 | Panel | Shows |
 |---|---|
 | Clock | Time and date, a thin bar for how much of the day has passed. Optional time zone, so you can add a second clock for somewhere else. |
-| Weather | Current conditions, high/low, feels-like, wind, rain chance and sunset, plus a 2–8 item daily or hourly forecast. Uses [Open-Meteo](https://open-meteo.com): free, no API key. |
+| Weather | Current conditions, high/low, feels-like, wind, rain chance and sunset, plus a forecast: day by day (today and the next few days, each with its high and low) or the next few hours. The day-by-day forecast can be a row under the current weather, **columns** (one per day), or a **list** with High, Low and Rain lined up in columns. Hide the current weather to make it a forecast-only panel. Uses [Open-Meteo](https://open-meteo.com): free, no API key. |
 | Upcoming | Tasks, events and day notes from the Plan tab. **List** layout groups everything coming up by day (Today, Tomorrow, Wednesday…). **Columns** layout shows today and the next 2–7 days side by side, each with its events; finished and ticked-off items stay dimmed, and a column that overflows says "+3 more". Items within 3 hours turn amber. Filter by category; items take their project's color. |
-| Countdown | A big number of days (then hours, then minutes) until a date, or until the next unfinished event matching a category or title. |
+| Countdown | A big number of days (then hours, then minutes) until a date, or until the next unfinished event matching a category or title. Count in days only, or weeks and days. |
 | Notes | A message or checklist you write from the editor. Supports `**bold**`, `_italic_`, `- bullets`, `[ ]` / `[x]` checkboxes and `# headings`. |
 | Goals | Today's goals and this week's goals with progress bars. Goals you do several times ("Gym 3x") show a row of marks. |
 | Projects | A progress bar per project, with days left and the next task. Sort by due date, progress, or your own order. |

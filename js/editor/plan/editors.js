@@ -423,3 +423,63 @@ export function editProject(anchor, id) {
   }, { key: `project:${id}`, width: 320 });
 }
 
+
+// Handy due dates: Today, Tomorrow, the coming Friday, next Monday, a week from today.
+export function dueChoices(from = new Date()) {
+  const d0 = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const plus = (n) => new Date(d0.getFullYear(), d0.getMonth(), d0.getDate() + n);
+  const dow = d0.getDay();
+  const short = (d) => d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const fri = plus((5 - dow + 7) % 7 || 7), mon = plus((1 - dow + 7) % 7 || 7);
+  const out = [
+    { label: 'Today', key: isoDate(d0), sub: short(d0) },
+    { label: 'Tomorrow', key: isoDate(plus(1)), sub: short(plus(1)) },
+    { label: 'Friday', key: isoDate(fri), sub: short(fri) },
+    { label: 'Next Monday', key: isoDate(mon), sub: short(mon) },
+    { label: 'In a week', key: isoDate(plus(7)), sub: short(plus(7)) },
+  ];
+  // Drop repeats (e.g. tomorrow is Friday).
+  return out.filter((c, i) => out.findIndex((x) => x.key === c.key) === i);
+}
+
+const longDay = (key) => parseLocal(key).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+
+// Give several tasks the same due date at once. Tasks with no day yet are planned for the due day.
+export function setDueDates(ids, key) {
+  const tasks = [...new Set(ids)].map((id) => M.findTask(id)).filter(Boolean);
+  if (!tasks.length) return;
+  M.batch(() => {
+    for (const t of tasks) {
+      const patch = { due: key || '' };
+      if (key && !t.date) patch.date = key;
+      M.updateTask(t.id, patch);
+    }
+  });
+  const n = tasks.length;
+  toast(key ? `${n === 1 ? `“${tasks[0].title}” is` : `${n} tasks are`} due ${longDay(key)}` : `Cleared the due date${n === 1 ? '' : `s on ${n} tasks`}`, false, { label: 'Undo', fn: undo });
+}
+
+export function editDueDates(anchor, ids) {
+  ids = [...new Set(ids)];
+  const tasks = ids.map((id) => M.findTask(id)).filter(Boolean);
+  if (!tasks.length) return;
+  const same = tasks.every((t) => (t.due || '') === (tasks[0].due || '')) ? tasks[0].due || '' : '';
+  const anyDue = tasks.some((t) => t.due);
+  const undated = tasks.filter((t) => !t.date).length;
+  openPopover(anchor, (el) => {
+    el.classList.add('pop-due');
+    el.innerHTML = `
+      <div class="pop-head">⚑ Due date${tasks.length > 1 ? ` for ${tasks.length} tasks` : ''}</div>
+      ${tasks.length === 1 ? `<p class="pop-note">${esc(tasks[0].title)}</p>` : ''}
+      <div class="due-quick">${dueChoices().map((c) => `<button type="button" class="due-q${c.key === same ? ' on' : ''}" data-key="${c.key}"><b>${c.label}</b><span>${esc(c.sub)}</span></button>`).join('')}</div>
+      <label class="pf"><span>Or pick a date</span><input type="date" data-f="due" value="${esc(same)}"></label>
+      ${undated ? `<p class="pop-note">${undated === tasks.length ? (tasks.length === 1 ? 'It has' : 'They have') : `${undated} of them have`} no day yet, so ${undated === 1 ? 'it’s' : 'they’re'} planned for the due day too.</p>` : ''}
+      ${anyDue ? '<div class="pop-actions"><button type="button" class="link" data-f="clear">Remove the due date' + (tasks.length > 1 ? 's' : '') + '</button></div>' : ''}`;
+    const pick = (key) => { closePopover(); setDueDates(ids, key); };
+    el.querySelectorAll('.due-q').forEach((b) => b.addEventListener('click', () => pick(b.dataset.key)));
+    const inp = el.querySelector('[data-f="due"]');
+    inp.addEventListener('change', () => { if (inp.value) pick(inp.value); });
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && inp.value) { e.preventDefault(); pick(inp.value); } });
+    el.querySelector('[data-f="clear"]')?.addEventListener('click', () => pick(''));
+  }, { key: `due:${ids.join(',')}`, width: 330 });
+}

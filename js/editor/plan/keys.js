@@ -27,6 +27,7 @@ export const ACTIONS = [
   { id: 'done', group: 'The selected or focused item', label: 'Mark done / not done', keys: ['Space', 'X'] },
   { id: 'edit', group: 'The selected or focused item', label: 'Edit', keys: ['Enter'] },
   { id: 'duplicate', group: 'The selected or focused item', label: 'Duplicate', keys: ['D'] },
+  { id: 'due', group: 'The selected or focused item', label: 'Set the due date', keys: ['Shift+D'] },
   { id: 'delete', group: 'The selected or focused item', label: 'Delete', keys: ['Delete', 'Backspace'] },
   { id: 'later', group: 'The selected or focused item', label: 'Move a day later', keys: ['Alt+ArrowRight'] },
   { id: 'earlier', group: 'The selected or focused item', label: 'Move a day earlier', keys: ['Alt+ArrowLeft'] },
