@@ -1,5 +1,5 @@
 import { registerPanel } from '../core/registry.js';
-import { occurrences, dayLabel, formatTime, startOfDay, addDays } from '../core/util.js';
+import { occurrences, dayLabel, formatTime, formatTimeRange, startOfDay, addDays } from '../core/util.js';
 
 // Project color wins; otherwise a stable soft color per category name, so "school" is always the same tint.
 function tint(ev, projects) {
@@ -46,8 +46,8 @@ function mountColumns(ctx) {
         const { hue, tag: label } = tint(ev, ctx.data.projects);
         const tag = s.showCategory && label ? `<span class="upc-cat">${ctx.esc(label)}</span>` : '';
         return `<li class="${done ? 'done' : ''}${soon ? ' soon' : ''}${ev.allDay ? ' allday' : ''}" style="--h:${hue}">
-          <span class="upc-time">${ev.allDay ? 'All day' : formatTime(ev.at, s.hour24)}${tag}</span>
-          <span class="upc-title">${ctx.esc(ev.title)}</span>
+          <span class="upc-time">${ev.allDay ? 'All day' : formatTimeRange(ev.day, ev.time, ev.end, s.hour24)}${tag}</span>
+          <span class="upc-title">${ev.priority ? `<b class="upc-prio">${'!'.repeat(ev.priority)}</b>` : ''}${ctx.esc(ev.title)}</span>
         </li>`;
       }).join('');
 
@@ -200,6 +200,7 @@ registerPanel({
     .upc-cat { color: hsl(var(--h) 55% 74%); overflow: hidden; text-overflow: ellipsis; }
     .upc-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .upc li.allday { border-left-style: dotted; }
+    .upc-prio { color: var(--ember); margin-right: .3em; font-weight: 800; }
     .upc li.soon .upc-time { color: var(--ember); }
     .upc li.soon .upc-title { color: #fff; }
     .upc li.done { opacity: .38; }

@@ -30,6 +30,9 @@ export function parseICS(text) {
   for (const line of lines) {
     if (line === 'BEGIN:VEVENT') { ev = {}; continue; }
     if (line === 'END:VEVENT') {
+      // Keep an end time when the event ends the same day.
+      if (ev._end && ev.time && ev._end.date === ev.date && ev._end.time > ev.time) ev.end = ev._end.time;
+      delete ev._end;
       if (ev.title && ev.date) out.push(ev);
       ev = null;
       continue;
@@ -44,11 +47,22 @@ export function parseICS(text) {
       case 'SUMMARY': ev.title = unescape(value); break;
       case 'UID': ev.uid = value.trim(); break;
       case 'DTSTART': { const s = parseStamp(value.trim(), params); if (s) Object.assign(ev, s); break; }
+      case 'DTEND': { const s = parseStamp(value.trim(), params); if (s?.time) ev._end = s; break; }
       case 'RRULE': {
         const rule = Object.fromEntries(value.split(';').map((kv) => kv.split('=')));
         const freq = { DAILY: 'daily', WEEKLY: 'weekly', MONTHLY: 'monthly', YEARLY: 'yearly' }[rule.FREQ];
-        // Only plain repeats map cleanly; INTERVAL>1 or BYDAY lists are imported as a single event.
-        if (freq && (!rule.INTERVAL || rule.INTERVAL === '1') && !(rule.BYDAY || '').includes(',')) {
+        // Plain repeats map cleanly, including weekly on several days (BYDAY=MO,WE,FR).
+        // INTERVAL>1 (every other week) is imported as a single event.
+        const byday = (rule.BYDAY || '').split(',').filter(Boolean);
+        if (freq === 'weekly' && byday.length > 1 && (!rule.INTERVAL || rule.INTERVAL === '1')) {
+          const map = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+          const days = byday.map((d) => map[d.slice(-2)]).filter((d) => d != null);
+          if (days.length > 1) {
+            ev.repeat = 'weekly';
+            ev.weekdays = [...new Set(days)];
+            if (rule.UNTIL) ev.until = parseStamp(rule.UNTIL, '')?.date || '';
+          }
+        } else if (freq && (!rule.INTERVAL || rule.INTERVAL === '1') && byday.length <= 1) {
           ev.repeat = freq;
           if (rule.UNTIL) ev.until = parseStamp(rule.UNTIL, '')?.date || '';
         }

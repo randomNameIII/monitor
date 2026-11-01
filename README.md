@@ -26,45 +26,39 @@ It's a plain static site (HTML, CSS and JavaScript modules, no build step), so G
 - Live, to-scale preview with the real panels and background.
 - Drag to move, drag the corner to resize, arrow keys to nudge (Shift + arrows to resize), Delete to remove. Overlapping panels get a red outline.
 - Settings forms are generated from each panel's definition, so new panels get an editor for free.
-- **Plan tab** for everything you have to do (details below).
-- Undo / redo (Ctrl+Z, Ctrl+Shift+Z), Ctrl+S to publish.
-- Backup to a JSON file and restore from one.
+- **Plan tab**
 
-**Display**
+Three views, switched with the buttons at the top or <kbd>D</kbd> / <kbd>M</kbd> / <kbd>L</kbd>; the editor remembers the last one you used.
 
-- Three animated backgrounds (Aurora, Tide, Drift) plus None. They render at very low resolution or with few particles, at a frame rate you choose (default 20 fps), and stop entirely when the screen is hidden.
-- Night dimming between hours you choose; the background slows to 6 fps while dimmed.
-- Burn-in protection: the layout shifts a few pixels every 4 minutes.
-- Keeps working offline: the last board and last weather are cached and shown until the network returns.
-- Reloads itself when you deploy a new version of the site, and once a night at about 4am.
-- Hides the cursor. Press `f` for full screen, `r` to reload.
-- A small dot in the corner shows sync status (green synced, amber stale, red error). You can turn it off.
+- **Days**: opens on today and the next 6 days, and scrolls sideways as far as you like in either direction. Mouse wheel or trackpad, <kbd>←</kbd>/<kbd>→</kbd> for a day, <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> or the arrow buttons for 7 days, <kbd>T</kbd> or **Today** to come back.
+- **Month**: the whole month as a calendar grid. Drag tasks between days, double-click a day to add, box-select, right-click. A day with more than fits shows "+3 more"; click it (or the date) to open that day in the Days view. <kbd>←</kbd>/<kbd>→</kbd> change month.
+- **List**: everything in one searchable table, with .ics import (Canvas, Google Calendar, Outlook) and a button to clear out finished items.
 
-**Plan tab**
-
-A continuous strip of days that scrolls sideways as far as you like in either direction (it loads more weeks as you go), with your goals, projects and an inbox beside it. Thin bands along the top mark each week and show its goal progress; the Goals list in the sidebar follows the week on screen.
-
-- **Moving around.** Scroll with the mouse wheel or trackpad, <kbd>←</kbd>/<kbd>→</kbd> for a day, <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> or the arrow buttons for a week, <kbd>T</kbd> or **Today** to jump back. Click a week band to line that week up.
+Your goals, projects and an inbox sit beside every view. The Goals list follows the week on screen.
 
 - **Adding things.** Press <kbd>N</kbd> (or Ctrl/Cmd+K, or the big round + button) from any tab. Type naturally and the preview shows what was understood:
   - `Lab report fri 5pm #school` → Friday at 5pm, category school
   - `Find sources @paper tomorrow` → tomorrow, in the project whose name starts with "paper" (a new project is made if none matches)
-  - `Calculus every mon 10am`, `Standup daily 9am` → repeating
+  - `Chem lecture mwf 9-9:50am` → every Monday, Wednesday and Friday, 9:00 to 9:50. Also `tth`, `tue thu`, `every mon, wed and fri`, `weekdays`, `daily`, `every month`
+  - `Seminar 11-1pm`, `from 2pm to 3:30pm` → a start and end time
+  - `Pay rent !!` → priority (`!`, `!!`, `!!!`); urgent tasks sort to the top of their day
   - `Essay due in 2 weeks`, `dentist oct 30 9:30 am`, `pay rent 11/1`
   - Words in "quotes" stay literal, e.g. `Study for "SAT" sat`.
 
   <kbd>Tab</kbd> switches between task, daily goal, weekly goal (`Gym 3x` sets how many times) and project (`Paper due nov 20`). <kbd>Shift</kbd>+<kbd>Enter</kbd> adds and keeps the box open for the next one.
+- **Paste a list.** Paste several lines (from a syllabus, notes, an email) into quick add, a day's add box, or straight onto the board, and each line becomes its own task. Bullets, numbers and checkboxes are stripped, and dates in each line still work. On the board, pasted tasks land on the day under the pointer (or the inbox if you're pointing at it).
+- **Copy.** <kbd>Ctrl</kbd>+<kbd>C</kbd> copies the selected or focused tasks; point at a day and <kbd>Ctrl</kbd>+<kbd>V</kbd> to paste copies there, keeping their spacing. Or hold <kbd>Alt</kbd> while dropping a drag to drop a copy and leave the original.
 - **Mouse shortcuts.** Double-click a day to type straight into it (Enter adds and keeps the box open). Middle-click a day for quick add with that day filled in. Hover a day header for "+ goal".
-- **Drag** tasks between days, onto a project, into the inbox, or from a project or the overdue list onto a day. Drag goals between days or into the week goals, and drag projects to reorder them. Hold a dragged item near the edge to scroll.
-- **Select several at once.** Drag across empty space to draw a box around tasks and day goals (hold Shift to add to what's selected), Shift/Ctrl-click to pick individual ones, or Ctrl+A for everything on screen. Then drag any of them to move them all (they keep their spacing), right-click for bulk options, or use <kbd>Space</kbd> (done), <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> (shift a day), <kbd>Delete</kbd>. <kbd>Esc</kbd> clears the selection. Bulk changes undo in one step.
-- **Right-click** anything for options: mark done, move to today/tomorrow/next week, set the project or category, duplicate, delete. Right-click a day header to mark everything done or push unfinished tasks to the next day.
-- **Click** a task to edit it in place (date, time, repeat, project, category, notes). Changes save as you type.
-- **Keyboard** on a focused task: <kbd>Space</kbd> done, <kbd>Enter</kbd> edit, <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> move a day, <kbd>Delete</kbd> delete. <kbd>←</kbd>/<kbd>→</kbd> scroll a day, <kbd>T</kbd> back to today.
+- **Drag** tasks between days, onto a project, into the inbox, or from a project or the overdue list onto a day. Drag goals between days or into the week goals, and drag projects to reorder them. Hold a dragged item near the edge to scroll. Dragging a Tue/Thu class a day later makes it Wed/Fri.
+- **Select several at once.** Drag across empty space to draw a box around tasks and day goals (hold Shift to add to what's selected), Shift/Ctrl-click to pick individual ones, or Ctrl+A for everything on screen. Then drag any of them to move them all (they keep their spacing), right-click for bulk options, or use <kbd>Space</kbd> (done), <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> (shift a day), <kbd>0</kbd>–<kbd>3</kbd> (priority), <kbd>Delete</kbd>. <kbd>Esc</kbd> clears the selection. Bulk changes undo in one step.
+- **Right-click** anything for options: mark done, move to today/tomorrow/next week, project, category, priority, copy, duplicate, delete. Right-click a day header to mark everything done or push unfinished tasks to the next day.
+- **Click** a task to edit it in place: date, start and end time, repeat (with weekday buttons for weekly repeats), priority, project, category, **steps** (a checklist inside the task; paste a list to add several) and notes. Changes save as you type, and cards show steps done ("☑ 2/5").
+- **Keyboard** on a focused task: <kbd>Space</kbd> done, <kbd>Enter</kbd> edit, <kbd>0</kbd>–<kbd>3</kbd> priority, <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> move a day, <kbd>Delete</kbd> delete.
 - **Goals**: daily goals sit at the top of each day; week goals are in the sidebar with a progress bar. Click the marks of a "3x" goal to count one; Shift+click or right-click removes one. When a week ends with goals unfinished, the next week offers to bring them over.
 - **Projects** fill their progress bar from their tasks (or a manual slider if they have none) and show days left. Expand one to see and add its tasks.
-- **Overdue** tasks that have scrolled off the left of the screen collect in the sidebar so you can drag them onto a day.
-- **List view** shows everything in one searchable table, with .ics import (Canvas, Google Calendar, Outlook) and a button to clear out finished items.
+- **Overdue** tasks that are off the left of the screen collect in the sidebar so you can drag them onto a day.
 - Every change can be undone (Ctrl+Z), and deletes show an Undo button.
+- **Updates**: when a new version of the site is published, the editor shows a "Reload" notice (your work is saved in the browser as you go, so reloading is safe).
 
 ## How sync works
 

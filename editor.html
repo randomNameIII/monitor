@@ -68,11 +68,12 @@
             <h1 id="weekLabel"></h1>
             <span class="week-sub"><span id="weekRel"></span><span id="weekSummary"></span></span>
           </div>
-          <button class="btn ghost small" id="weekThis" title="Jump to today (T)">Today</button>
+          <button class="btn ghost small" id="weekThis" title="Back to today (T)">Today</button>
         </div>
         <div class="view-toggle" role="group" aria-label="View">
-          <button type="button" data-view="week" aria-pressed="true">Week</button>
-          <button type="button" data-view="list" aria-pressed="false">List</button>
+          <button type="button" data-view="days" aria-pressed="true" title="Today and the days after it (D)">Days</button>
+          <button type="button" data-view="month" aria-pressed="false" title="The whole month (M)">Month</button>
+          <button type="button" data-view="list" aria-pressed="false" title="Everything in a searchable list (L)">List</button>
         </div>
         <div class="plan-keys" aria-hidden="true">
           <span><kbd>N</kbd> add</span><span>Double-click a day</span><span>Drag empty space to select</span><span>Right-click for options</span>
@@ -81,6 +82,7 @@
       <div class="plan-body">
         <div class="plan-main plan-scroll" id="planMain">
           <div class="timeline" id="planWeek"></div>
+          <div class="month" id="planMonth" hidden></div>
           <div class="plan-list" id="planList" hidden>
             <div class="list-toolbar">
               <input type="search" id="listSearch" placeholder="Search tasks, projects, categories" aria-label="Search">
@@ -126,6 +128,11 @@
     </section>
   </main>
 
+  <div class="update-bar" id="updateBar" role="status" hidden>
+    <span>A new version of Dusk is ready.</span>
+    <button type="button" class="btn primary small" id="updateReload">Reload</button>
+    <button type="button" class="btn ghost small" id="updateLater">Later</button>
+  </div>
   <div class="toast" id="toast" role="status" hidden></div>
   <script type="module" src="js/editor/main.js"></script>
 </body>

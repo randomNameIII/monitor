@@ -8,6 +8,7 @@ import { initBoardTab } from './boardtab.js';
 import { initSyncTab } from './synctab.js';
 import { toast, relativeTime } from './ui.js';
 import { saveLocal } from '../core/sync.js';
+import { watchForUpdates, refreshAndReload } from '../core/update.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -81,6 +82,21 @@ window.addEventListener('beforeunload', (e) => {
   if (prefs.token && prefs.gist && isDirty()) { e.preventDefault(); e.returnValue = ''; }
 });
 
+/* ---------- new versions ---------- */
+// An editor tab can stay open for days; when a new version is deployed, offer to reload.
+// Everything is saved in this browser as you go, so reloading never loses work.
+watchForUpdates(() => {
+  const bar = $('updateBar');
+  bar.hidden = false;
+  $('updateReload').onclick = async () => {
+    $('updateReload').disabled = true;
+    $('updateReload').textContent = 'Reloading…';
+    if (prefs.token && prefs.gist && isDirty()) { try { await publish(); } catch { /* published again after reload */ } }
+    refreshAndReload();
+  };
+  $('updateLater').onclick = () => { bar.hidden = true; };
+}, { minutes: 5 });
+
 /* ---------- start ---------- */
 saveLocal(state.cfg); // make sure a local display has something to show straight away
 initLayout();
@@ -90,3 +106,5 @@ initSyncTab();
 onChange(renderPubState);
 renderPubState();
 showTab(location.hash.slice(1) || 'layout');
+// Changes made just before the page was closed or reloaded may not have been published yet.
+if (prefs.token && prefs.gist && prefs.autopublish && isDirty()) publish().catch(() => {});

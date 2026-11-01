@@ -16,6 +16,28 @@ export function formatTime(d, h24 = false, withSeconds = false) {
   return `${h}:${m}${s} ${ampm}`;
 }
 
+// "2:00–3:15 pm", or "11:00 am–1:00 pm" when the halves of the day differ. Falls back to the start time.
+export function formatTimeRange(date, time, end, h24 = false) {
+  const a = parseLocal(date, time);
+  if (!a) return '';
+  if (!end || end <= time) return formatTime(a, h24);
+  const b = parseLocal(date, end);
+  if (h24) return `${formatTime(a, true)}–${formatTime(b, true)}`;
+  const [as, aap] = formatTime(a).split(' ');
+  const [bs, bap] = formatTime(b).split(' ');
+  return aap === bap ? `${as}–${bs} ${bap}` : `${as} ${aap}–${bs} ${bap}`;
+}
+
+const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// [1,3,5] → "Mon, Wed, Fri"; [1..5] → "Weekdays"
+export function weekdaysLabel(days) {
+  const set = [...new Set(days)].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7));
+  if (set.length === 5 && [1, 2, 3, 4, 5].every((d) => set.includes(d))) return 'Weekdays';
+  if (set.length === 2 && set.includes(0) && set.includes(6)) return 'Weekends';
+  if (set.length === 7) return 'Every day';
+  return set.map((d) => DAY_SHORT[d]).join(', ');
+}
+
 export function isoDate(d) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
@@ -80,6 +102,19 @@ export function occurrences(events, { from = new Date(), days = 30, categories =
     };
 
     if (repeat === 'none') { push(first); continue; }
+
+    // Weekly on several days (e.g. a Mon/Wed/Fri class): walk day by day and keep the chosen weekdays.
+    const days = repeat === 'weekly' && Array.isArray(ev.weekdays) && ev.weekdays.length ? new Set(ev.weekdays) : null;
+    if (days) {
+      let w = first;
+      const behind = daysBetween(first, windowStart);
+      if (behind > 1) w = addDays(first, behind - 1);
+      for (let i = 0; i < 800; i++, w = addDays(w, 1)) {
+        if (!days.has(w.getDay())) { if (w >= windowEnd) break; continue; }
+        if (!push(w)) break;
+      }
+      continue;
+    }
 
     let d = new Date(first);
     // Jump close to the window so long-running repeats stay cheap.

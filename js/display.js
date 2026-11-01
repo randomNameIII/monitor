@@ -12,6 +12,7 @@ import { createBackground } from './core/background.js';
 import { subscribe, store } from './core/sync.js';
 import { defaultConfig } from './core/config.js';
 import { inWindow } from './core/util.js';
+import { watchForUpdates, refreshAndReload } from './core/update.js';
 
 const params = new URLSearchParams(location.search);
 if (params.has('reset')) {
@@ -119,21 +120,10 @@ window.addEventListener('keydown', (e) => {
 
 // Reload when a new version of the site is deployed (version.json changes), and once a night
 // at about 4am so a display that runs for weeks starts fresh.
-let version = null;
-async function checkVersion() {
-  try {
-    const res = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
-    if (!res.ok) return;
-    const v = (await res.json()).build;
-    if (version && v && v !== version) location.reload();
-    version = version || v;
-  } catch { /* offline; try later */ }
-}
-checkVersion();
-setInterval(checkVersion, 20 * 60 * 1000);
+watchForUpdates(() => refreshAndReload(), { minutes: 20 });
 
 const loadedOn = new Date().toDateString();
 setInterval(() => {
   const now = new Date();
-  if (now.getHours() === 4 && now.toDateString() !== loadedOn) location.reload();
+  if (now.getHours() === 4 && now.toDateString() !== loadedOn) refreshAndReload();
 }, 10 * 60 * 1000);

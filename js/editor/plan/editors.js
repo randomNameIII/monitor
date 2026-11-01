@@ -26,6 +26,17 @@ export function deleteWithUndo(label, fn) {
 
 /* ---------------- task ---------------- */
 
+const WD = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const WD_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const PRIORITIES = [[0, 'None'], [1, '!'], [2, '!!'], [3, '!!!']];
+
+// Lines pasted or typed into a list box: strip bullets, numbers and checkboxes.
+export function cleanLines(text) {
+  return String(text || '').split(/\r?\n/)
+    .map((l) => l.replace(/^\s*(?:[-*•–]|\d+[.)]|\[[ xX]?\])\s*/, '').replace(/^\[[ xX]?\]\s*/, '').trim())
+    .filter(Boolean);
+}
+
 export function editTask(anchor, id, day = null) {
   const t = M.findTask(id);
   if (!t) return;
@@ -40,11 +51,17 @@ export function editTask(anchor, id, day = null) {
       ${repeating && day ? `<p class="pop-note">Repeats. Ticking off marks only ${esc(parseLocal(day).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }))}.</p>` : ''}
       <div class="pop-grid">
         <label class="pf"><span>Date<button type="button" class="link pf-clear" data-f="unschedule" ${t.date ? '' : 'hidden'}>No date</button></span><input type="date" data-f="date" value="${esc(t.date || '')}"></label>
-        ${field('Time', `<input type="time" data-f="time" value="${esc(t.time || '')}">`)}
         ${field('Repeats', `<select data-f="repeat">${REPEATS.map(([v, l]) => `<option value="${v}" ${v === (t.repeat || 'none') ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}
-        ${field('Until', `<input type="date" data-f="until" value="${esc(t.until || '')}">`, `pf-until${repeating ? '' : ' hidden'}`)}
+        <div class="pf pf-wide"><span>Time</span><div class="pf-time"><input type="time" data-f="time" value="${esc(t.time || '')}" aria-label="Start"><i>to</i><input type="time" data-f="end" value="${esc(t.end || '')}" aria-label="End" ${t.time ? '' : 'disabled'}></div></div>
+        ${field('Until', `<input type="date" data-f="until" value="${esc(t.until || '')}">`, `pf-wide pf-until${repeating ? '' : ' hidden'}`)}
+        <div class="pf pf-wide pf-days${t.repeat === 'weekly' ? '' : ' hidden'}"><span>On</span><div class="wd-row" data-f="days"></div></div>
+        <div class="pf"><span>Priority</span><div class="seg" data-f="priority">${PRIORITIES.map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${(t.priority || 0) === v}" title="${v ? `Priority ${v}` : 'No priority'}">${l}</button>`).join('')}</div></div>
         ${field('Project', `<select data-f="projectId"><option value="">None</option>${state.cfg.data.projects.filter((p) => !p.archived || p.id === t.projectId).map((p) => `<option value="${p.id}" ${p.id === t.projectId ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}</select>`)}
         ${field('Category', `<input data-f="category" list="popCats" value="${esc(t.category || '')}" placeholder="none"><datalist id="popCats">${categories().map((c) => `<option value="${esc(c)}">`).join('')}</datalist>`)}
+      </div>
+      <div class="pf pf-wide"><span>Steps <output data-f="stepCount"></output></span>
+        <ul class="substeps" data-f="steps"></ul>
+        <input class="step-add" data-f="stepAdd" placeholder="Add a step (paste a list to add several)">
       </div>
       ${field('Notes', `<textarea data-f="notes" rows="2" placeholder="Details, links…">${esc(t.notes || '')}</textarea>`, 'pf-wide')}
       <div class="pop-actions">
@@ -54,6 +71,7 @@ export function editTask(anchor, id, day = null) {
       </div>`;
 
     const q = (f) => el.querySelector(`[data-f="${f}"]`);
+    const cur = () => M.findTask(id);
     const title = q('title');
     const grow = () => { title.style.height = 'auto'; title.style.height = `${title.scrollHeight}px`; };
     requestAnimationFrame(grow);
@@ -62,26 +80,118 @@ export function editTask(anchor, id, day = null) {
 
     q('done').addEventListener('click', (e) => {
       M.toggleTask(id, day || t.date);
-      const on = M.isTaskDoneOn(M.findTask(id), day || t.date);
+      const on = M.isTaskDoneOn(cur(), day || t.date);
       e.currentTarget.classList.toggle('on', on);
       e.currentTarget.setAttribute('aria-pressed', on);
     });
-    q('date').addEventListener('change', (e) => { M.updateTask(id, { date: e.target.value }); q('unschedule').hidden = !e.target.value; });
-    q('unschedule').addEventListener('click', () => { M.moveTask(id, ''); q('date').value = ''; q('time').value = ''; q('unschedule').hidden = true; });
-    q('time').addEventListener('change', (e) => M.updateTask(id, { time: e.target.value }));
+    q('date').addEventListener('change', (e) => { M.updateTask(id, { date: e.target.value }); q('unschedule').hidden = !e.target.value; drawDays(); });
+    q('unschedule').addEventListener('click', () => { M.moveTask(id, ''); q('date').value = ''; q('time').value = ''; q('end').value = ''; q('unschedule').hidden = true; });
+    q('time').addEventListener('change', (e) => {
+      const patch = { time: e.target.value };
+      if (!e.target.value) patch.end = '';
+      // Keep the same length when the start moves.
+      const c = cur();
+      if (e.target.value && c.time && c.end) {
+        const toMin = (x) => +x.slice(0, 2) * 60 + +x.slice(3, 5);
+        const len = toMin(c.end) - toMin(c.time);
+        const endMin = Math.min(23 * 60 + 59, toMin(e.target.value) + len);
+        patch.end = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
+        q('end').value = patch.end;
+      }
+      M.updateTask(id, patch);
+      q('end').disabled = !e.target.value;
+      if (!e.target.value) q('end').value = '';
+    });
+    q('end').addEventListener('change', (e) => M.updateTask(id, { end: e.target.value > cur().time ? e.target.value : '' }));
     q('repeat').addEventListener('change', (e) => {
       const patch = { repeat: e.target.value };
-      if (e.target.value !== 'none' && !M.findTask(id).date) { patch.date = isoDate(new Date()); q('date').value = patch.date; }
+      if (e.target.value !== 'none' && !cur().date) { patch.date = isoDate(new Date()); q('date').value = patch.date; }
+      if (e.target.value !== 'weekly') delete cur().weekdays;
       M.updateTask(id, patch);
       el.querySelector('.pf-until').classList.toggle('hidden', e.target.value === 'none');
+      el.querySelector('.pf-days').classList.toggle('hidden', e.target.value !== 'weekly');
+      drawDays();
     });
     q('until').addEventListener('change', (e) => M.updateTask(id, { until: e.target.value }));
+
+    // Weekday chips for weekly repeats: pick several for a Mon/Wed/Fri class.
+    function drawDays() {
+      const c = cur();
+      if (!c || c.repeat !== 'weekly' || !c.date) { q('days').innerHTML = ''; return; }
+      const on = new Set(c.weekdays?.length ? c.weekdays : [parseLocal(c.date).getDay()]);
+      const order = state.cfg.board.weekStart === 'sunday' ? [0, 1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5, 6, 0];
+      q('days').innerHTML = order.map((d) => `<button type="button" class="wd" data-d="${d}" aria-pressed="${on.has(d)}" title="${WD_LONG[d]}">${WD[d]}</button>`).join('');
+    }
+    q('days').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-d]');
+      if (!b) return;
+      const c = cur();
+      const d = +b.dataset.d;
+      const set = new Set(c.weekdays?.length ? c.weekdays : [parseLocal(c.date).getDay()]);
+      if (set.has(d)) { if (set.size === 1) return; set.delete(d); } else set.add(d);
+      const list = [...set];
+      if (list.length === 1) {
+        // Back to a plain weekly repeat: move the start onto that weekday.
+        const start = parseLocal(c.date);
+        const shift = (list[0] - start.getDay() + 7) % 7;
+        delete c.weekdays;
+        M.updateTask(id, { date: isoDate(new Date(start.getFullYear(), start.getMonth(), start.getDate() + shift)) });
+        q('date').value = cur().date;
+      } else {
+        M.updateTask(id, { weekdays: list });
+      }
+      drawDays();
+    });
+    drawDays();
+
+    q('priority').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-v]');
+      if (!b) return;
+      M.updateTask(id, { priority: +b.dataset.v || 0 });
+      q('priority').querySelectorAll('[data-v]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    });
     q('projectId').addEventListener('change', (e) => M.updateTask(id, { projectId: e.target.value }));
     q('category').addEventListener('input', (e) => M.updateTask(id, { category: e.target.value.trim().toLowerCase() }, { group: `cat:${id}` }));
     q('notes').addEventListener('input', (e) => M.updateTask(id, { notes: e.target.value }, { group: `notes:${id}` }));
+
+    // Steps: a small checklist inside the task.
+    function drawSteps() {
+      const steps = cur()?.steps || [];
+      q('stepCount').textContent = steps.length ? `${steps.filter((x) => x.done).length}/${steps.length}` : '';
+      q('steps').innerHTML = steps.map((st) => `<li data-step="${st.id}" class="${st.done ? 'done' : ''}">
+        <button type="button" class="tick small${st.done ? ' on' : ''}" data-s="tick" aria-label="Step done"></button>
+        <input value="${esc(st.title)}" data-s="title" aria-label="Step">
+        <button type="button" class="step-x" data-s="del" aria-label="Remove step">×</button>
+      </li>`).join('');
+    }
+    q('steps').addEventListener('click', (e) => {
+      const li = e.target.closest('[data-step]');
+      if (!li) return;
+      const sid = li.dataset.step;
+      if (e.target.closest('[data-s="tick"]')) { const st = cur().steps.find((x) => x.id === sid); M.updateStep(id, sid, { done: !st.done }); drawSteps(); }
+      if (e.target.closest('[data-s="del"]')) { M.deleteStep(id, sid); drawSteps(); }
+    });
+    q('steps').addEventListener('input', (e) => {
+      const li = e.target.closest('[data-step]');
+      if (li && e.target.dataset.s === 'title') M.updateStep(id, li.dataset.step, { title: e.target.value }, { group: `step:${li.dataset.step}` });
+    });
+    q('steps').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target.dataset.s === 'title') { e.preventDefault(); q('stepAdd').focus(); }
+    });
+    const addSteps = (lines) => { for (const l of lines) M.addStep(id, l); drawSteps(); };
+    q('stepAdd').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); addSteps(cleanLines(e.target.value)); e.target.value = ''; }
+    });
+    q('stepAdd').addEventListener('paste', (e) => {
+      const text = e.clipboardData?.getData('text') || '';
+      const lines = cleanLines(text);
+      if (lines.length > 1) { e.preventDefault(); M.batch(() => addSteps(lines)); toast(`Added ${lines.length} steps`); }
+    });
+    drawSteps();
+
     q('duplicate').addEventListener('click', () => { M.duplicateTask(id); closePopover(); toast('Duplicated'); });
     q('delete').addEventListener('click', () => deleteWithUndo(t.title, () => M.deleteTask(id)));
-  }, { key: `task:${id}` });
+  }, { key: `task:${id}`, width: 352 });
 }
 
 /* ---------------- goal ---------------- */

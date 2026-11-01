@@ -2,7 +2,8 @@
 //
 // Draggables:  [data-drag="<kind>"][data-id]   (extra data-* are passed through as `src`)
 // Drop zones:  [data-drop][data-accept="kind kind…"]   (data-* passed through as `zone`)
-// onDrop({ kind, id, src, zone, beforeId, el }) is called when something is dropped on an accepting zone.
+// onDrop({ kind, id, src, zone, beforeId, el, copy }) is called when something is dropped on an accepting zone.
+// copy is true when Alt (or Ctrl/Cmd) was held at the drop.
 // Items with data-ordered="false" (e.g. timed tasks, which sort by time) don't show an insertion line.
 // Holding the pointer near the edge of a .plan-scroll container scrolls it, in both directions.
 
@@ -67,7 +68,19 @@ export function enableDrag(root, { onDrop, onStart, onEnd, decorate }) {
     pending = null;
   });
   window.addEventListener('pointercancel', () => { if (drag) finish(false); pending = null; });
-  window.addEventListener('keydown', (e) => { if (drag && e.key === 'Escape') { e.preventDefault(); finish(false); } }, true);
+  window.addEventListener('keydown', (e) => {
+    if (!drag) return;
+    if (e.key === 'Escape') { e.preventDefault(); finish(false); return; }
+    if (e.key === 'Alt') e.preventDefault(); // keep the browser menu bar from taking focus
+    setCopy(e.altKey || e.ctrlKey || e.metaKey);
+  }, true);
+  window.addEventListener('keyup', (e) => { if (drag) setCopy(e.altKey || e.ctrlKey || e.metaKey); }, true);
+
+  function setCopy(on) {
+    if (!drag || drag.copy === on) return;
+    drag.copy = on;
+    document.body.classList.toggle('drag-copy', on);
+  }
 
   function start() {
     const el = pending.el;
@@ -96,6 +109,7 @@ export function enableDrag(root, { onDrop, onStart, onEnd, decorate }) {
   }
 
   function move(e) {
+    setCopy(e.altKey || e.ctrlKey || e.metaKey);
     drag.ghost.style.transform = `translate(${e.clientX - drag.dx}px, ${e.clientY - drag.dy}px) rotate(-1.2deg)`;
     hitTest(e.clientX, e.clientY);
     scroller.update(e.clientX, e.clientY);
@@ -140,12 +154,12 @@ export function enableDrag(root, { onDrop, onStart, onEnd, decorate }) {
     d.line.remove();
     d.el.classList.remove('drag-src');
     d.zone?.classList.remove('drop-over');
-    document.body.classList.remove('is-dragging');
+    document.body.classList.remove('is-dragging', 'drag-copy');
     // Swallow the click that follows a drag so it doesn't open the editor.
     const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
     window.addEventListener('click', swallow, { capture: true, once: true });
     setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 0);
     onEnd?.(d);
-    if (commit && d.zone) onDrop({ kind: d.kind, id: d.id, src: d.src, zone: { ...d.zone.dataset }, beforeId: d.beforeId, el: d.el });
+    if (commit && d.zone) onDrop({ kind: d.kind, id: d.id, src: d.src, zone: { ...d.zone.dataset }, beforeId: d.beforeId, el: d.el, copy: !!d.copy });
   }
 }

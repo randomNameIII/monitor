@@ -1,9 +1,9 @@
-// Plan tab: a continuous, horizontally scrolling strip of days, with weekly goals, projects and an
-// inbox beside it. Everything is direct manipulation: drag to move, drag across empty space to select
+// Plan tab: a continuous, horizontally scrolling strip of days (or a month grid, or a list), with goals,
+// projects and an inbox beside it. Everything is direct manipulation: drag to move, drag across empty space to select
 // several things, right-click for options, click to edit in place, double-click a day (or press N) to add.
 
 import { state, onChange, undo, commit } from '../state.js';
-import { esc, isoDate, addDays, parseLocal, weekStartOf, formatTime, dayLabel, occurrences, startOfDay, daysBetween } from '../../core/util.js';
+import { esc, isoDate, addDays, parseLocal, weekStartOf, formatTime, formatTimeRange, weekdaysLabel, dayLabel, occurrences, startOfDay, daysBetween } from '../../core/util.js';
 import { goalsForDay, goalsForWeek, isGoalDone, projectProgress, nextProjectTask, byOrder, categoryHue, daysUntil } from '../../core/planning.js';
 import { uid } from '../../core/config.js';
 import * as M from './model.js';
@@ -13,7 +13,8 @@ import { enableMarquee, paintSelection, clearSelection, toggleSelected, isSelect
 import { openMenu, closeMenu } from './menu.js';
 import { closePopover } from './popover.js';
 import { editTask, editGoal, editProject, deleteWithUndo } from './editors.js';
-import { openQuickAdd, setQuickAddHandler, isQuickAddOpen } from './quickadd.js';
+import { openQuickAdd, setQuickAddHandler, isQuickAddOpen, resolveLine, createParsed, addLines } from './quickadd.js';
+import { cleanLines } from './editors.js';
 import { parseICS } from '../ics.js';
 import { toast } from '../ui.js';
 
@@ -35,7 +36,9 @@ let colW = 200;
 let focusWeek = weekStartOf(new Date(), ws());
 let firstVisible = '';
 let positioned = false;
-let view = 'week';
+let monthCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+let view = (() => { try { const v = localStorage.getItem('dusk.plan.view'); return ['days', 'month', 'list'].includes(v) ? v : 'days'; } catch { return 'days'; } })();
+const monthEl = $('planMonth');
 let inline = null;          // { zone, value } — which inline add box is open
 let flash = null;           // id of an item to highlight after it's added
 const expanded = new Set(); // project ids open in the sidebar
@@ -66,17 +69,18 @@ function taskCard(t, { day = '', compact = false, showDate = false } = {}) {
   const proj = t.projectId && M.findProject(t.projectId);
   const meta = [];
   if (showDate && t.date) meta.push(`<span class="m-date">${esc(dayLabel(parseLocal(t.date)))}</span>`);
-  if (t.time) meta.push(`<span class="m-time">${formatTime(parseLocal(t.date || todayKey(), t.time))}</span>`);
-  if (repeating) meta.push(`<span title="${REPEAT_LABEL[t.repeat]}">↻</span>`);
+  if (t.time) meta.push(`<span class="m-time">${formatTimeRange(t.date || todayKey(), t.time, t.end)}</span>`);
+  if (repeating) meta.push(`<span title="${repeatLabel(t)}">↻</span>`);
+  if (t.steps?.length) meta.push(`<span class="m-steps${t.steps.every((x) => x.done) ? ' all' : ''}" title="Steps done">☑ ${t.steps.filter((x) => x.done).length}/${t.steps.length}</span>`);
   if (t.category) meta.push(`<span class="m-cat">#${esc(t.category)}</span>`);
   if (proj && !compact) meta.push(`<span class="m-proj">${esc(proj.title)}</span>`);
   if (t.notes) meta.push('<span title="Has notes">¶</span>');
-  return `<li class="task${done ? ' done' : ''}${overdue ? ' overdue' : ''}${flash === t.id ? ' flash' : ''}" tabindex="0"
+  return `<li class="task${done ? ' done' : ''}${overdue ? ' overdue' : ''}${t.priority ? ` p${t.priority}` : ''}${flash === t.id ? ' flash' : ''}" tabindex="0"
       data-drag="task" data-id="${t.id}" data-day="${day}" data-ordered="${t.time ? 'false' : 'true'}"
       ${hue != null ? `style="--h:${hue}"` : ''}>
       <button type="button" class="tick${done ? ' on' : ''}" data-act="tick" aria-label="${done ? 'Mark not done' : 'Mark done'}"></button>
       <div class="task-main">
-        <span class="task-title">${esc(t.title)}</span>
+        <span class="task-title">${t.priority ? `<b class="prio" title="Priority ${t.priority}">${'!'.repeat(t.priority)}</b>` : ''}${esc(t.title)}</span>
         ${meta.length ? `<span class="task-meta">${meta.join('')}</span>` : ''}
       </div>
     </li>`;
@@ -110,9 +114,15 @@ function addButton(zone, label) {
   return `<button type="button" class="add-row" data-act="inline" data-target="${zone}">+ ${label}</button>`;
 }
 
+function repeatLabel(t) {
+  if (t.repeat === 'weekly' && t.weekdays?.length > 1) return `Every ${weekdaysLabel(t.weekdays)}`.replace('Every Weekdays', 'Every weekday').replace('Every Weekends', 'Every weekend').replace('Every Every day', 'Every day');
+  return REPEAT_LABEL[t.repeat] || '';
+}
+
 function sortDay(items) {
   return items.sort((a, b) => {
     if (!a.time !== !b.time) return a.time ? 1 : -1; // untimed first
+    if (!a.time && (a.priority || 0) !== (b.priority || 0)) return (b.priority || 0) - (a.priority || 0); // then most urgent
     if (!a.time) return (a.order ?? 0) - (b.order ?? 0);
     return a.time.localeCompare(b.time);
   });
@@ -136,21 +146,6 @@ function renderTimeline() {
   const occ = occurrences(ev(), { from: rangeStart, days: n });
   const byDay = new Map();
   for (const o of occ) (byDay.get(o.day) || byDay.set(o.day, []).get(o.day)).push(o);
-  const thisWeek = isoDate(weekStartOf(new Date(), ws()));
-
-  let bands = '';
-  for (let w = 0; w < rangeWeeks; w++) {
-    const start = addDays(rangeStart, w * 7);
-    const key = isoDate(start);
-    const goals = goalsForWeek(state.cfg.data.goals, start);
-    const done = goals.filter(isGoalDone).length;
-    const end = addDays(start, 6);
-    const range = `${start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${end.toLocaleDateString(undefined, start.getMonth() === end.getMonth() ? { day: 'numeric' } : { month: 'short', day: 'numeric' })}`;
-    bands += `<div class="wband${key === thisWeek ? ' this' : ''}${key === isoDate(focusWeek) ? ' focus' : ''}" style="grid-column:${w * 7 + 1} / span 7" data-week="${key}" data-act="week-band">
-      <span class="wband-label"><b>${weekName(start)}</b><span>${range}</span>${goals.length ? `<span class="wband-goals${done === goals.length ? ' all' : ''}">${done}/${goals.length} goals</span>` : ''}</span>
-    </div>`;
-  }
-
   let days = '';
   for (let i = 0; i < n; i++) {
     const d = addDays(rangeStart, i);
@@ -159,7 +154,7 @@ function renderTimeline() {
     const goals = goalsForDay(state.cfg.data.goals, key);
     const gDone = goals.filter(isGoalDone).length;
     const showMonth = i === 0 || d.getDate() === 1;
-    days += `<section class="day${key === today ? ' today' : ''}${key < today ? ' past' : ''}${i % 7 === 0 ? ' wstart' : ''}" style="grid-column:${i + 1}" data-drop data-accept="task day-goal week-goal" data-zone="day" data-day="${key}">
+    days += `<section class="day${key === today ? ' today' : ''}${key < today ? ' past' : ''}${d.getDate() === 1 ? ' mstart' : ''}" style="grid-column:${i + 1}" data-drop data-accept="task day-goal week-goal" data-zone="day" data-day="${key}">
       <header class="day-head" data-act="day-menu">
         <span class="dow">${d.toLocaleDateString(undefined, { weekday: 'short' })}</span>
         <span class="dnum">${d.getDate()}</span>
@@ -176,7 +171,80 @@ function renderTimeline() {
   }
   weekEl.style.setProperty('--colw', `${colW}px`);
   weekEl.style.setProperty('--days', n);
-  weekEl.innerHTML = bands + days;
+  weekEl.innerHTML = days;
+}
+
+/* ----------------------------- month view ----------------------------- */
+
+function monthGrid() {
+  const first = monthCursor;
+  const gridStart = weekStartOf(first, ws());
+  const last = new Date(first.getFullYear(), first.getMonth() + 1, 0);
+  const weeks = Math.ceil((daysBetween(gridStart, last) + 1) / 7);
+  return { first, last, gridStart, weeks };
+}
+
+function miniTask(t, day) {
+  const done = M.isTaskDoneOn(t, day);
+  const hue = edgeHue(t);
+  const overdue = !done && day < todayKey() && !(t.repeat && t.repeat !== 'none');
+  const time = t.time ? formatTime(parseLocal(day, t.time)).replace(':00', '').replace(' ', '') : '';
+  return `<li class="task mini${done ? ' done' : ''}${overdue ? ' overdue' : ''}${t.priority ? ` p${t.priority}` : ''}${flash === t.id ? ' flash' : ''}" tabindex="0"
+      data-drag="task" data-id="${t.id}" data-day="${day}" data-ordered="${t.time ? 'false' : 'true'}" ${hue != null ? `style="--h:${hue}"` : ''}>
+      <button type="button" class="tick" data-act="tick" aria-label="${done ? 'Mark not done' : 'Mark done'}"></button>
+      <span class="task-title">${esc(t.title)}</span>${time ? `<span class="m-time">${time}</span>` : ''}
+    </li>`;
+}
+
+function renderMonth() {
+  const { first, gridStart, weeks } = monthGrid();
+  const today = todayKey();
+  const occ = occurrences(ev(), { from: gridStart, days: weeks * 7 });
+  const byDay = new Map();
+  for (const o of occ) (byDay.get(o.day) || byDay.set(o.day, []).get(o.day)).push(o);
+
+  let head = '';
+  for (let i = 0; i < 7; i++) head += `<div class="mhead">${addDays(gridStart, i).toLocaleDateString(undefined, { weekday: 'short' })}</div>`;
+  let cells = '';
+  for (let i = 0; i < weeks * 7; i++) {
+    const d = addDays(gridStart, i);
+    const key = isoDate(d);
+    const items = sortDay(byDay.get(key) || []);
+    const goals = goalsForDay(state.cfg.data.goals, key);
+    const gDone = goals.filter(isGoalDone).length;
+    const out = d.getMonth() !== first.getMonth();
+    cells += `<section class="mday${out ? ' out' : ''}${key === today ? ' today' : ''}${key < today ? ' past' : ''}" data-drop data-accept="task day-goal week-goal" data-zone="day" data-day="${key}">
+      <header class="mday-head">
+        <button type="button" class="mnum" data-act="open-day" data-day="${key}" title="Open this day">${d.getDate() === 1 ? d.toLocaleDateString(undefined, { month: 'short' }) + ' ' : ''}${d.getDate()}</button>
+        ${goals.length ? `<span class="dgoals${gDone === goals.length ? ' all' : ''}" title="Goals for the day">${gDone}/${goals.length}</span>` : ''}
+      </header>
+      <ol class="tasks">${items.map((t) => miniTask(t, key)).join('')}</ol>
+      <button type="button" class="mmore" data-act="open-day" data-day="${key}" hidden></button>
+      ${inlineBox(`day:${key}`, 'New task')}
+    </section>`;
+  }
+  monthEl.style.setProperty('--weeks', weeks);
+  monthEl.innerHTML = `<div class="mgrid">${head}${cells}</div>`;
+  requestAnimationFrame(collapseMonth);
+}
+
+// Hide what doesn't fit in each day and say how many more there are.
+function collapseMonth() {
+  for (const cell of monthEl.querySelectorAll('.mday')) {
+    const list = cell.querySelector('.tasks');
+    const more = cell.querySelector('.mmore');
+    const items = [...list.children];
+    items.forEach((li) => { li.hidden = false; });
+    more.hidden = true;
+    if (!items.length) continue;
+    const limit = () => (cell.querySelector('.inline-add') || more).getBoundingClientRect().top;
+    more.hidden = false;
+    more.textContent = '+0 more';
+    let hidden = 0;
+    for (let i = items.length - 1; i >= 0 && items[i].getBoundingClientRect().bottom > limit() + 1; i--) { items[i].hidden = true; hidden++; }
+    if (hidden) more.textContent = `+${hidden} more`;
+    else more.hidden = true;
+  }
 }
 
 /* ----------------------------- scrolling ----------------------------- */
@@ -216,7 +284,7 @@ function ensureRange(key) {
 }
 
 // Put `key` at the left edge, with `before` days of context to its left.
-function scrollToDay(key, { smooth = false, before = 1 } = {}) {
+function scrollToDay(key, { smooth = false, before = 0 } = {}) {
   ensureRange(isoDate(addDays(parseLocal(key), -before - 7)));
   ensureRange(isoDate(addDays(parseLocal(key), 14)));
   const left = Math.max(0, (indexOf(key) - before) * colW);
@@ -246,12 +314,36 @@ function goDays(delta) {
 
 function goToday() {
   closePopover();
+  if (view === 'month') { monthCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1); render(); return; }
   scrollToDay(todayKey(), { smooth: positioned });
+}
+
+function goMonth(delta) {
+  closePopover();
+  monthCursor = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + delta, 1);
+  render();
+}
+
+// Jump from the month grid (or anywhere) to a day in the Days view.
+function openDay(key) {
+  setView('days');
+  scrollToDay(key, { before: 0 });
+  render({ timeline: false });
+}
+
+function setView(v) {
+  if (v === view) return;
+  view = v;
+  try { localStorage.setItem('dusk.plan.view', v); } catch { /* storage unavailable */ }
+  closePopover();
+  clearSelection();
+  render();
+  if (view === 'days') { positioned = false; sizeColumns(); render({ timeline: false }); }
 }
 
 let scrollQueued = false;
 function onScroll() {
-  if (view !== 'week' || scrollQueued) return;
+  if (view !== 'days' || scrollQueued) return;
   scrollQueued = true;
   requestAnimationFrame(() => {
     scrollQueued = false;
@@ -262,10 +354,8 @@ function onScroll() {
     const f = computeFocus();
     const firstKey = keyAt(visibleRange().first);
     if (isoDate(f) !== isoDate(focusWeek) || firstKey !== firstVisible) {
-      const weekChanged = isoDate(f) !== isoDate(focusWeek);
       focusWeek = f;
       firstVisible = firstKey;
-      if (weekChanged) weekEl.querySelectorAll('.wband').forEach((b) => b.classList.toggle('focus', b.dataset.week === isoDate(focusWeek)));
       render({ timeline: false });
     } else {
       renderBar();
@@ -375,14 +465,31 @@ function projectCard(p) {
 function renderBar() {
   const fmt = (d, opts) => d.toLocaleDateString(undefined, opts);
   root.querySelectorAll('.view-toggle button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
-  if (view !== 'week' || !positioned) { $('weekLabel').textContent = view === 'list' ? 'Everything' : ''; $('weekRel').textContent = ''; $('weekSummary').textContent = ''; return; }
+  $('weekPrev').hidden = $('weekNext').hidden = view === 'list';
+  $('weekPrev').title = view === 'month' ? 'Previous month (←)' : 'Back 7 days (Shift+←)';
+  $('weekNext').title = view === 'month' ? 'Next month (→)' : 'Forward 7 days (Shift+→)';
+  if (view === 'list') { $('weekLabel').textContent = 'Everything'; $('weekRel').textContent = ''; $('weekSummary').textContent = `${ev().length} items`; $('weekThis').hidden = true; return; }
+
+  if (view === 'month') {
+    const { first, gridStart, weeks } = monthGrid();
+    $('weekLabel').textContent = fmt(first, { month: 'long', year: 'numeric' });
+    const now = new Date();
+    const diff = (first.getFullYear() - now.getFullYear()) * 12 + first.getMonth() - now.getMonth();
+    $('weekThis').hidden = diff === 0;
+    $('weekRel').textContent = diff === 0 ? 'This month' : diff === 1 ? 'Next month' : diff === -1 ? 'Last month' : diff > 0 ? `${diff} months ahead` : `${-diff} months back`;
+    const occ = occurrences(ev(), { from: gridStart, days: weeks * 7 }).filter((o) => parseLocal(o.day).getMonth() === first.getMonth());
+    $('weekSummary').textContent = occ.length ? `${occ.filter((o) => o.done).length} of ${occ.length} tasks done` : '';
+    return;
+  }
+
+  if (!positioned) return;
   const { first, last } = visibleRange();
   const a = addDays(rangeStart, first), z = addDays(rangeStart, last);
   $('weekLabel').textContent = `${fmt(a, { month: 'short', day: 'numeric' })} – ${a.getMonth() === z.getMonth() ? z.getDate() : fmt(z, { month: 'short', day: 'numeric' })}`;
   const t = indexOf(todayKey());
-  const todayOn = t >= first && t <= last;
-  $('weekThis').hidden = todayOn;
-  if (todayOn) $('weekRel').textContent = 'Today is on screen';
+  $('weekThis').hidden = t === first;
+  if (t === first) $('weekRel').textContent = 'Today and the next 6 days'.replace('6', String(last - first));
+  else if (t > first && t <= last) $('weekRel').textContent = 'Today is on screen';
   else {
     const off = t < first ? first - t : last - t;
     const n = Math.abs(off);
@@ -411,7 +518,7 @@ function renderList() {
     const repeating = t.repeat && t.repeat !== 'none';
     const next = repeating ? occurrences([t], { from: new Date(), days: 400 })[0] : null;
     const at = next ? next.at : t.date ? parseLocal(t.date, t.time) : null;
-    const when = at ? `${next ? 'Next: ' : ''}${dayLabel(at)}${t.time ? `, ${formatTime(at)}` : ''}` : '<span class="muted">No date</span>';
+    const when = at ? `${next ? 'Next: ' : ''}${dayLabel(at)}${t.time ? `, ${formatTimeRange(isoDate(at), t.time, t.end)}` : ''}` : '<span class="muted">No date</span>';
     const proj = M.findProject(t.projectId);
     const done = repeating ? false : !!t.done;
     return `<tr data-row="${t.id}" class="${done ? 'done' : ''}${!done && !repeating && t.date && t.date < today ? ' overdue' : ''}">
@@ -420,7 +527,7 @@ function renderList() {
       <td class="c-title">${esc(t.title)}${t.source ? ` <span class="muted small">from ${esc(t.source)}</span>` : ''}</td>
       <td>${proj ? `<span class="m-proj" style="--h:${proj.hue}">${esc(proj.title)}</span>` : ''}</td>
       <td>${t.category ? `#${esc(t.category)}` : ''}</td>
-      <td>${repeating ? `${REPEAT_LABEL[t.repeat]}${t.until ? ` until ${esc(t.until)}` : ''}` : ''}</td>
+      <td>${repeating ? `${repeatLabel(t)}${t.until ? ` until ${esc(t.until)}` : ''}` : ''}</td>
     </tr>`;
   }).join('');
 
@@ -437,9 +544,18 @@ export function render({ timeline = true } = {}) {
   const inlineFocused = document.activeElement?.dataset?.inline;
   const scroll = [scrollEl.scrollTop, scrollEl.scrollLeft, sideEl.scrollTop];
 
-  weekEl.hidden = view !== 'week';
+  weekEl.hidden = view !== 'days';
+  monthEl.hidden = view !== 'month';
   listEl.hidden = view !== 'list';
-  if (timeline) { if (view === 'week') renderTimeline(); else renderList(); }
+  root.dataset.view = view;
+  if (view === 'month') {
+    // The sidebar's goals follow the week of today in this month, or the month's first week.
+    const now = new Date();
+    const thisMonth = now.getFullYear() === monthCursor.getFullYear() && now.getMonth() === monthCursor.getMonth();
+    focusWeek = weekStartOf(thisMonth ? now : monthCursor, ws());
+    firstVisible = isoDate(monthGrid().gridStart);
+  }
+  if (timeline) { if (view === 'days') renderTimeline(); else if (view === 'month') renderMonth(); else renderList(); }
   renderSide();
   renderBar();
 
@@ -576,6 +692,8 @@ function selectionMenu(e) {
       { label: 'None', action: () => bulkSet({ category: '' }) },
       ...cats.map((c) => ({ label: c, swatch: categoryHue(c), action: () => bulkSet({ category: c }) })),
     ] },
+    { label: 'Priority', disabled: !tasks, items: [[0, 'None'], [1, '!  Priority'], [2, '!!  High'], [3, '!!!  Urgent']].map(([v, l]) => ({ label: l, action: () => bulkSet({ priority: v }) })) },
+    { label: 'Copy', hint: 'Ctrl+C', disabled: !tasks, action: () => document.execCommand('copy') },
     '-',
     { label: 'Clear selection', hint: 'Esc', action: () => { clearSelection(); } },
     { label: `Delete ${n}`, hint: 'Del', danger: true, action: bulkDelete },
@@ -583,6 +701,10 @@ function selectionMenu(e) {
 }
 
 function selectVisible() {
+  if (view === 'month') {
+    setSelection([...monthEl.querySelectorAll('.mday:not(.out) [data-drag="task"]')].map(keyOf));
+    return;
+  }
   const { first, last } = visibleRange();
   const keys = [];
   for (const el of weekEl.querySelectorAll('[data-drag="task"], [data-drag="day-goal"]')) {
@@ -602,27 +724,80 @@ function openInline(zone) {
   render();
 }
 
-function submitInline(input) {
-  const zone = input.dataset.inline;
-  const text = input.value.trim();
-  if (!text) { inline = null; render(); return; }
+// What an inline box adds to: a day, the inbox, a project, the week's goals or a day's goals.
+function inlineContext(zone) {
   const [type, arg] = zone.split(':');
-  let item;
-  if (type === 'day' || type === 'inbox' || type === 'project') {
-    const p = parseQuick(text, { projects: state.cfg.data.projects, kind: 'task' });
-    let projectId = type === 'project' ? arg : p.project?.id || '';
-    if (p.newProject) projectId = M.addProject({ title: p.newProject[0].toUpperCase() + p.newProject.slice(1) }).id;
-    let date = p.dateKey || (type === 'day' ? arg : '');
-    if (!date && (p.time || p.repeat !== 'none')) date = todayKey();
-    item = M.addTask({ title: p.title || text, date, time: p.time, category: p.category, repeat: p.repeat, projectId });
-    if (date && type === 'day' && date !== arg) toast(`Added to ${dayLabel(parseLocal(date))}`, false, { label: 'Show', fn: () => { flash = item.id; scrollToDay(date, { smooth: true }); render(); } });
-  } else if (type === 'week' || type === 'dgoal') {
-    const p = parseQuick(text, { kind: type === 'week' ? 'week-goal' : 'day-goal' });
-    item = M.addGoal({ scope: type === 'week' ? 'week' : 'day', date: type === 'week' ? isoDate(focusWeek) : arg, title: p.title || text, target: p.target });
+  if (type === 'day') return { kind: 'task', day: arg };
+  if (type === 'project') return { kind: 'task', projectId: arg };
+  if (type === 'inbox') return { kind: 'task' };
+  if (type === 'week') return { kind: 'week-goal', week: isoDate(focusWeek) };
+  return { kind: 'day-goal', day: arg };
+}
+
+function submitInline(input, pasted = null) {
+  const zone = input.dataset.inline;
+  const lines = pasted || cleanLines(input.value);
+  if (!lines.length) { inline = null; render(); return; }
+  const ctx = inlineContext(zone);
+  let made;
+  if (lines.length > 1) {
+    made = addLines(lines, ctx);
+    toast(`Added ${made.length} items`, false, { label: 'Undo', fn: undo });
+  } else {
+    const p = resolveLine(lines[0], ctx);
+    if (!p.title) p.title = lines[0];
+    made = [createParsed(p, ctx)];
+    const date = made[0].item.date;
+    if (ctx.kind === 'task' && date && ctx.day && date !== ctx.day) {
+      toast(`Added to ${dayLabel(parseLocal(date))}`, false, { label: 'Show', fn: () => { flash = made[0].item.id; if (view === 'days') scrollToDay(date, { smooth: true }); render(); } });
+    }
   }
-  flash = item?.id || null;
+  flash = made[made.length - 1]?.item.id || null;
   inline = { zone, value: '', focus: true }; // keep it open for the next one
   render();
+}
+
+/* ----------------------------- copy and paste ----------------------------- */
+
+let clip = null;          // { text, items: [{ task, day }] } — what Ctrl+C copied
+let hoverDay = null;      // the day under the pointer, where Ctrl+V pastes
+let hoverZone = null;
+
+function copyItems() {
+  if (selectionSize()) return selTasks().map((x) => ({ task: M.findTask(x.id), day: x.day }));
+  const el = document.activeElement?.closest?.('[data-drag="task"]');
+  if (el && root.contains(el)) return [{ task: M.findTask(el.dataset.id), day: el.dataset.day || '' }];
+  return [];
+}
+
+function onCopy(e) {
+  if (!visible() || e.target.closest?.('input, textarea') || document.querySelector('.pop, .qa-backdrop')) return;
+  const items = copyItems().filter((x) => x.task);
+  if (!items.length) return;
+  const text = items.map(({ task, day }) => [task.title, day ? dayLabel(parseLocal(day)) : '', task.time ? formatTimeRange(day || todayKey(), task.time, task.end) : ''].filter(Boolean).join(' · ')).join('\n');
+  e.clipboardData.setData('text/plain', text);
+  e.preventDefault();
+  clip = { text, items: items.map(({ task, day }) => ({ task: structuredClone(task), day })) };
+  toast(`Copied ${items.length}. Point at a day and press Ctrl+V to paste.`);
+}
+
+function onPaste(e) {
+  if (!visible() || view === 'list' || e.target.closest?.('input, textarea, [contenteditable="true"]') || document.querySelector('.pop, .qa-backdrop, .ctx-root')) return;
+  const text = e.clipboardData?.getData('text') || '';
+  if (!text.trim()) return;
+  e.preventDefault();
+  const toInbox = hoverZone === 'inbox';
+  const day = toInbox ? '' : hoverDay || document.activeElement?.closest?.('[data-day]')?.dataset.day || todayKey();
+  let made;
+  if (clip && clip.text === text) {
+    // Our own copy: exact duplicates, keeping their spacing across days.
+    M.batch(() => { made = M.pasteTasks(clip.items, day); });
+    setSelection(made.map((t) => `t:${t.id}:${t.date}`));
+  } else {
+    // Text from anywhere else: one task per line.
+    made = addLines(cleanLines(text), { kind: 'task', day: day || undefined }).map((m) => m.item);
+  }
+  toast(`Pasted ${made.length} ${toInbox ? 'into the inbox' : `to ${dayLabel(parseLocal(day))}`}`, false, { label: 'Undo', fn: undo });
 }
 
 function carryOver() {
@@ -673,7 +848,9 @@ function taskMenu(e, id, day) {
       ...cats.map((c) => ({ label: c, swatch: categoryHue(c), checked: c === t.category, action: () => M.updateTask(id, { category: c }) })),
       ...(cats.length ? [] : [{ label: 'Type #name when adding a task', disabled: true }]),
     ] },
+    { label: 'Priority', items: [[0, 'None'], [1, '!  Priority'], [2, '!!  High'], [3, '!!!  Urgent']].map(([v, l]) => ({ label: l, checked: (t.priority || 0) === v, hint: v ? String(v) : '0', action: () => M.updateTask(id, { priority: v }) })) },
     { label: 'Duplicate', action: () => { M.duplicateTask(id); toast('Duplicated'); } },
+    { label: 'Copy', hint: 'Ctrl+C', action: () => { anchor.focus?.(); document.execCommand('copy'); } },
     '-',
     { label: 'Delete', hint: 'Del', danger: true, action: () => deleteWithUndo(t.title, () => M.deleteTask(id)) },
   ]);
@@ -750,7 +927,7 @@ function onClick(e) {
     toggleSelected(item);
     return;
   }
-  if (a === 'week-band') { scrollToDay(act.dataset.week, { smooth: true, before: 0 }); return; }
+  if (a === 'open-day') { openDay(act.dataset.day); return; }
   if (a === 'sel-clear') { clearSelection(); return; }
   if (a === 'sel-menu') { const r = act.getBoundingClientRect(); selectionMenu({ preventDefault() {}, target: act, clientX: r.left, clientY: r.bottom + 6, detail: e.detail }); return; }
   if (a === 'sel-done') { bulkDone(); return; }
@@ -805,7 +982,28 @@ function onDblClick(e) {
   else if (zone === 'projects') newProject();
 }
 
-function onDrop({ kind, id, src, zone, beforeId, el }) {
+function onDrop({ kind, id, src, zone, beforeId, el, copy }) {
+  // Alt held while dropping: leave the originals and drop copies.
+  if (copy && zone.zone === 'day') {
+    const multi = selectionSize() > 1 && el && isSelected(el);
+    if (kind === 'task') {
+      const items = multi ? selTasks().map((x) => ({ task: M.findTask(x.id), day: x.day })) : [{ task: M.findTask(id), day: src.day || '' }];
+      const grabbed = src.day || zone.day;
+      const days = items.map((x) => x.day).filter(Boolean).sort();
+      const base = days[0] || grabbed;
+      const newBase = isoDate(addDays(parseLocal(zone.day), daysBetween(parseLocal(grabbed), parseLocal(base))));
+      let made;
+      M.batch(() => { made = M.pasteTasks(items, newBase); });
+      if (multi) setSelection(made.map((t) => `t:${t.id}:${t.date}`));
+      toast(`Copied ${made.length}`, false, { label: 'Undo', fn: undo });
+      return;
+    }
+    if (kind === 'day-goal') {
+      const g = M.findGoal(id);
+      if (g) M.addGoal({ scope: 'day', date: zone.day, title: g.title, target: g.target || 1 });
+      return;
+    }
+  }
   if (selectionSize() > 1 && el && isSelected(el)) {
     if (zone.zone === 'day') bulkMoveTo(zone.day, { anchorDay: src.day || (kind === 'day-goal' ? M.findGoal(id)?.date : null) || null });
     else if (zone.zone === 'inbox') bulkUnschedule('');
@@ -848,7 +1046,7 @@ function onKey(e) {
     return;
   }
   if (!visible() || inField || document.querySelector('.pop, .ctx-root, .qa-backdrop')) return;
-  if (mod && e.key.toLowerCase() === 'a' && view === 'week') { e.preventDefault(); selectVisible(); return; }
+  if (mod && e.key.toLowerCase() === 'a' && view !== 'list') { e.preventDefault(); selectVisible(); return; }
   if (mod) return;
 
   // Keys for a multi-selection.
@@ -857,6 +1055,7 @@ function onKey(e) {
     if (e.key === ' ' || e.key === 'x') { e.preventDefault(); bulkDone(); return; }
     if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); bulkDelete(); return; }
     if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); bulkShift(e.key === 'ArrowRight' ? 1 : -1); return; }
+    if (/^[0-3]$/.test(e.key)) { e.preventDefault(); bulkSet({ priority: +e.key }); return; }
     if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
       e.preventDefault();
       const r = $('selBar').getBoundingClientRect();
@@ -877,6 +1076,7 @@ function onKey(e) {
       else if (kind === 'project') { expanded.has(id) ? expanded.delete(id) : expanded.add(id); render(); }
       return;
     }
+    if (/^[0-3]$/.test(e.key) && kind === 'task') { e.preventDefault(); M.updateTask(id, { priority: +e.key }); return; }
     if (e.key === 'Enter') {
       e.preventDefault();
       if (kind === 'task') editTask(item, id, item.dataset.day || null);
@@ -895,8 +1095,7 @@ function onKey(e) {
       const to = isoDate(addDays(parseLocal(item.dataset.day), e.key === 'ArrowRight' ? 1 : -1));
       M.moveTask(id, to, { fromDay: item.dataset.day });
       // Follow the task if it moved off screen.
-      ensureRange(to);
-      if (!isDayVisible(to)) goDays(e.key === 'ArrowRight' ? 1 : -1);
+      if (view === 'days') { ensureRange(to); if (!isDayVisible(to)) goDays(e.key === 'ArrowRight' ? 1 : -1); }
       const moved = [...root.querySelectorAll(`[data-id="${id}"]`)].find((x) => x.dataset.day === to);
       moved?.focus({ preventScroll: true });
       return;
@@ -908,10 +1107,16 @@ function onKey(e) {
       return;
     }
   }
-  if (e.altKey || view !== 'week') return;
-  if (e.key === 'ArrowLeft' && !item) { e.preventDefault(); goDays(e.shiftKey ? -7 : -1); }
+  if (e.altKey || view === 'list') return;
+  if (view === 'month') {
+    if (e.key === 'ArrowLeft' && !item) { e.preventDefault(); goMonth(-1); }
+    else if (e.key === 'ArrowRight' && !item) { e.preventDefault(); goMonth(1); }
+  } else if (e.key === 'ArrowLeft' && !item) { e.preventDefault(); goDays(e.shiftKey ? -7 : -1); }
   else if (e.key === 'ArrowRight' && !item) { e.preventDefault(); goDays(e.shiftKey ? 7 : 1); }
-  else if (e.key === 't' || e.key === 'T') { goToday(); }
+  if (e.key === 't' || e.key === 'T') { goToday(); }
+  else if (e.key === 'd' || e.key === 'D') setView('days');
+  else if (e.key === 'm' || e.key === 'M') setView('month');
+  else if (e.key === 'l' || e.key === 'L') setView('list');
 }
 
 async function importICS(file) {
@@ -923,7 +1128,11 @@ async function importICS(file) {
     for (const item of imported) {
       const prev = item.uid && existing.get(item.uid);
       // Keep whatever you've ticked off or attached locally when re-importing.
-      if (prev) { Object.assign(prev, { title: item.title, date: item.date, time: item.time, repeat: item.repeat, until: item.until }); updated++; }
+      if (prev) {
+        Object.assign(prev, { title: item.title, date: item.date, time: item.time, end: item.end || '', repeat: item.repeat, until: item.until });
+        if (item.weekdays) prev.weekdays = item.weekdays; else delete prev.weekdays;
+        updated++;
+      }
       else { ev().push({ id: uid(), source, category: source.toLowerCase().slice(0, 24), done: false, ...item }); added++; }
     }
     commit('events');
@@ -951,6 +1160,20 @@ export function initPlan() {
     else if (e.key === 'Escape') { e.preventDefault(); inline = null; render(); }
   });
   root.addEventListener('input', (e) => { const input = e.target.closest?.('[data-inline]'); if (input && inline) inline.value = input.value; });
+  // Pasting a list into an inline box adds one item per line.
+  root.addEventListener('paste', (e) => {
+    const input = e.target.closest?.('[data-inline]');
+    if (!input) return;
+    const lines = cleanLines(e.clipboardData?.getData('text') || '');
+    if (lines.length > 1) { e.preventDefault(); submitInline(input, lines); }
+  });
+  root.addEventListener('pointermove', (e) => {
+    hoverDay = e.target.closest?.('[data-zone="day"]')?.dataset.day || null;
+    hoverZone = e.target.closest?.('[data-zone]')?.dataset.zone || null;
+  }, { passive: true });
+  root.addEventListener('pointerleave', () => { hoverDay = null; hoverZone = null; });
+  document.addEventListener('copy', onCopy);
+  document.addEventListener('paste', onPaste);
   root.addEventListener('focusout', (e) => {
     const input = e.target.closest?.('[data-inline]');
     if (!input || input.value.trim()) return;
@@ -981,31 +1204,32 @@ export function initPlan() {
 
   // Drag across empty space on the board to select several items.
   enableMarquee(scrollEl, {
-    canStart: (e) => view === 'week' && !e.target.closest('[data-drag], button, input, textarea, select, a, .wband'),
+    canStart: (e) => view !== 'list' && !e.target.closest('[data-drag], button, input, textarea, select, a'),
   });
   onSelectionChange(() => { paintSelection(root); renderSelectionBar(); });
 
-  $('weekPrev').addEventListener('click', () => goDays(-7));
-  $('weekNext').addEventListener('click', () => goDays(7));
+  $('weekPrev').addEventListener('click', () => (view === 'month' ? goMonth(-1) : goDays(-7)));
+  $('weekNext').addEventListener('click', () => (view === 'month' ? goMonth(1) : goDays(7)));
   $('weekThis').addEventListener('click', goToday);
   $('planFab').addEventListener('click', () => openQuickAdd({ week: isoDate(focusWeek) }));
-  root.querySelectorAll('.view-toggle button').forEach((b) => b.addEventListener('click', () => {
-    view = b.dataset.view; closePopover(); clearSelection(); render();
-    if (view === 'week') { positioned = false; sizeColumns(); }
-  }));
+  root.querySelectorAll('.view-toggle button').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
 
   scrollEl.addEventListener('scroll', onScroll, { passive: true });
   // A plain mouse wheel scrolls the days sideways, unless a day is tall enough to need scrolling down.
   scrollEl.addEventListener('wheel', (e) => {
-    if (view !== 'week' || e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-    const overHeader = e.target.closest('.day-head, .wband');
+    if (view !== 'days' || e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    const overHeader = e.target.closest('.day-head');
     const fitsVertically = scrollEl.scrollHeight <= scrollEl.clientHeight + 1;
     if (overHeader || fitsVertically || e.shiftKey) {
       e.preventDefault();
       scrollEl.scrollLeft += e.deltaY * (e.deltaMode === 1 ? 32 : 1);
     }
   }, { passive: false });
-  new ResizeObserver(() => { if (visible() && view === 'week') sizeColumns(); }).observe(scrollEl);
+  new ResizeObserver(() => {
+    if (!visible()) return;
+    if (view === 'days') sizeColumns();
+    else if (view === 'month') collapseMonth();
+  }).observe(scrollEl);
 
   // List view controls
   $('listSearch').addEventListener('input', (e) => { listFilter.q = e.target.value; renderList(); });
@@ -1037,10 +1261,13 @@ export function initPlan() {
     flash = item.id;
     if (kind === 'task' && item.projectId) expanded.add(item.projectId);
     render();
-    if (visible() && view === 'week') {
+    if (visible() && view === 'days') {
       if (kind === 'task' && item.date) revealDay(item.date);
       if (kind === 'day-goal') revealDay(item.date);
       if (kind === 'week-goal' && isoDate(focusWeek) !== item.date) scrollToDay(item.date, { smooth: true, before: 0 });
+    } else if (visible() && view === 'month' && (kind === 'task' || kind === 'day-goal') && item.date) {
+      const d = parseLocal(item.date);
+      if (d.getMonth() !== monthCursor.getMonth() || d.getFullYear() !== monthCursor.getFullYear()) { monthCursor = new Date(d.getFullYear(), d.getMonth(), 1); render(); }
     }
   });
 
@@ -1061,6 +1288,10 @@ export function initPlan() {
   setInterval(() => { if (todayKey() !== day) { day = todayKey(); render(); } }, 60000);
   render();
   // The tab starts hidden, so columns are sized (and scrolled to today) the first time it's shown.
-  new MutationObserver(() => { if (visible() && view === 'week') { sizeColumns(); render({ timeline: false }); } }).observe(root, { attributes: true, attributeFilter: ['hidden'] });
-  if (visible()) { sizeColumns(); render({ timeline: false }); }
+  const onShown = () => {
+    if (view === 'days') { sizeColumns(); render({ timeline: false }); }
+    else if (view === 'month') collapseMonth();
+  };
+  new MutationObserver(() => { if (visible()) onShown(); }).observe(root, { attributes: true, attributeFilter: ['hidden'] });
+  if (visible()) onShown();
 }

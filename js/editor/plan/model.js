@@ -30,6 +30,10 @@ export function addTask(fields) {
     category: fields.category || '', repeat: fields.repeat || 'none', until: '',
     projectId: fields.projectId || '', done: false,
   };
+  if (fields.end && t.time) t.end = fields.end;
+  if (fields.priority) t.priority = fields.priority;
+  if (fields.weekdays?.length > 1 && t.repeat === 'weekly') t.weekdays = [...fields.weekdays];
+  if (fields.steps?.length) t.steps = fields.steps.map((x) => ({ id: uid(), title: x.title, done: !!x.done }));
   t.order = nextOrder(data().events.filter((e) => e.date === t.date && !e.time));
   data().events.push(t);
   save();
@@ -74,9 +78,11 @@ export function moveTask(id, toDay, { fromDay = null, beforeId = null, projectId
     t.date = isoDate(addDays(parseLocal(t.date), delta));
     if (t.until) t.until = isoDate(addDays(parseLocal(t.until), delta));
     t.doneOn = (t.doneOn || []).map((d) => isoDate(addDays(parseLocal(d), delta)));
+    // A Mon/Wed/Fri class dragged a day later becomes Tue/Thu/Sat.
+    if (t.weekdays?.length) t.weekdays = t.weekdays.map((w) => (((w + delta) % 7) + 7) % 7);
   } else {
     t.date = toDay || '';
-    if (!toDay) { t.time = ''; t.repeat = 'none'; t.until = ''; }
+    if (!toDay) { t.time = ''; t.end = ''; t.repeat = 'none'; t.until = ''; delete t.weekdays; }
   }
   if (!t.time) {
     // Untimed tasks on a day are ordered together; unscheduled ones are ordered within their project (or the inbox).
@@ -84,6 +90,62 @@ export function moveTask(id, toDay, { fromDay = null, beforeId = null, projectId
       && (t.date || (e.projectId || '') === (t.projectId || '')));
     reorderInto(siblings, t, beforeId);
   }
+  save();
+}
+
+// Copies of tasks placed relative to a new day: each keeps its offset from the earliest one copied.
+// items: [{ task, day }] (day = the occurrence copied, '' for undated)
+export function pasteTasks(items, toDay) {
+  const dated = items.filter((x) => x.day);
+  const base = dated.length ? dated.map((x) => x.day).sort()[0] : null;
+  const made = [];
+  for (const { task, day } of items) {
+    const copy = { ...structuredClone(task), id: uid(), done: false, doneOn: [] };
+    delete copy.uid; delete copy.source;
+    if (copy.steps) copy.steps = copy.steps.map((x) => ({ ...x, id: uid(), done: false }));
+    if (toDay) {
+      const off = day && base ? daysBetween(parseLocal(base), parseLocal(day)) : 0;
+      const target = isoDate(addDays(parseLocal(toDay), off));
+      // A pasted repeating occurrence becomes a one-off on the new day.
+      copy.date = target;
+      copy.repeat = 'none'; copy.until = ''; delete copy.weekdays;
+    }
+    data().events.push(copy);
+    made.push(copy);
+  }
+  save();
+  return made;
+}
+
+/* ---------------- steps (a checklist inside a task) ---------------- */
+
+export function addStep(taskId, title) {
+  const t = findTask(taskId);
+  if (!t || !title.trim()) return null;
+  t.steps = t.steps || [];
+  const st = { id: uid(), title: title.trim(), done: false };
+  t.steps.push(st);
+  save();
+  return st;
+}
+export function updateStep(taskId, stepId, patch, opts) {
+  const st = findTask(taskId)?.steps?.find((x) => x.id === stepId);
+  if (!st) return;
+  Object.assign(st, patch);
+  save(opts);
+}
+export function deleteStep(taskId, stepId) {
+  const t = findTask(taskId);
+  if (!t?.steps) return;
+  t.steps = t.steps.filter((x) => x.id !== stepId);
+  save();
+}
+export function moveStep(taskId, stepId, toIndex) {
+  const t = findTask(taskId);
+  const i = t?.steps?.findIndex((x) => x.id === stepId);
+  if (i == null || i < 0) return;
+  const [st] = t.steps.splice(i, 1);
+  t.steps.splice(Math.max(0, Math.min(toIndex, t.steps.length)), 0, st);
   save();
 }
 
