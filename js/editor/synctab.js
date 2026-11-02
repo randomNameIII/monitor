@@ -10,6 +10,22 @@ const root = document.getElementById('syncPage');
 const baseUrl = () => new URL('.', location.href).href;
 const displayUrl = () => `${baseUrl()}display.html?gist=${encodeURIComponent(prefs.gist)}`;
 
+// "Connect another computer" links carry the gist and token after the #, which browsers never send
+// to the server. Anyone with the link can edit the board, so it's shown only on request.
+const b64 = (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64 = (s) => decodeURIComponent(escape(atob(s.replace(/-/g, '+').replace(/_/g, '/'))));
+const connectUrl = () => `${baseUrl()}editor.html#connect=${b64(JSON.stringify({ g: prefs.gist, t: prefs.token }))}`;
+
+export function readConnectLink() {
+  const m = location.hash.match(/^#connect=([\w-]+)/);
+  if (!m) return null;
+  try {
+    const j = JSON.parse(unb64(m[1]));
+    return j.g && j.t ? { gist: j.g, token: j.t } : null;
+  } catch { return null; }
+}
+let showConnect = false;
+
 function render() {
   const hasToken = !!prefs.token;
   const hasGist = !!prefs.gist;
@@ -54,6 +70,22 @@ function render() {
       </ol>
       <label class="toggle inline"><input type="checkbox" id="autoPub" ${prefs.autopublish ? 'checked' : ''}><span class="switch" aria-hidden="true"></span>
         <span>Publish automatically a few seconds after each change</span></label>
+    </section>
+
+    <section class="card form-section" id="otherComputers">
+      <h2>Edit from other computers</h2>
+      ${hasToken && hasGist ? `
+        <p>Open the editor on a laptop or another desktop and add to your schedule there. Every computer edits the same board:
+          changes are published to the gist and picked up by the others within about 30 seconds. If two computers change things at
+          the same time, both sets of changes are kept.</p>
+        ${showConnect ? `
+          <div class="row"><input id="connectLink" readonly value="${esc(connectUrl())}"><button class="btn" id="copyConnect">Copy</button></div>
+          <p class="warn-text">This link includes your GitHub token, so anyone who has it can change your board. Send it only to yourself
+            (an email or note to yourself is fine), and don’t post it anywhere. You can revoke the token on GitHub at any time.</p>
+          <button class="link" id="hideConnect">Hide link</button>`
+        : '<div class="row"><button class="btn primary" id="makeConnect">Get a link for another computer</button></div>'}
+        <p class="muted">Or, on the other computer, open <code>${esc(baseUrl())}editor.html</code>, go to Sync, and paste the same token and the gist ID <code>${esc(prefs.gist)}</code>.</p>`
+      : '<p class="muted">Set up sync above first. Then you can open the editor on any computer and add things to your schedule there.</p>'}
     </section>
 
     <section class="card form-section">
@@ -105,6 +137,14 @@ function render() {
     } catch (err) { toast(err.message, true); }
   });
   on('forgetGist', 'click', () => { prefs.gist = ''; render(); toast('Disconnected. The gist itself is untouched.'); });
+
+  on('makeConnect', 'click', () => { showConnect = true; render(); document.getElementById('connectLink')?.select(); });
+  on('hideConnect', 'click', () => { showConnect = false; render(); });
+  on('copyConnect', 'click', async () => {
+    const input = document.getElementById('connectLink');
+    try { await navigator.clipboard.writeText(input.value); } catch { input.select(); document.execCommand('copy'); }
+    toast('Link copied. Open it on the other computer.');
+  });
 
   on('copyLink', 'click', async () => {
     const input = document.getElementById('displayLink');

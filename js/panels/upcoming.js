@@ -1,6 +1,7 @@
 import { registerPanel } from '../core/registry.js';
 import { occurrences, dayLabel, formatTime, formatTimeRange, startOfDay, addDays, isoDate, parseLocal } from '../core/util.js';
-import { notesForDay, categoryHue } from '../core/planning.js';
+import { notesForDay, categoryHue, wallOrder } from '../core/planning.js';
+import { autoScroll, stopScroll, SPEEDS } from '../core/autoscroll.js';
 
 // Project color wins; otherwise a stable soft color per category name, so "school" is always the same tint.
 function tint(ev, projects) {
@@ -53,14 +54,15 @@ function mountColumns(ctx) {
       const day = addDays(today, i);
       const next = addDays(day, 1);
       const items = all.filter((ev) => ev.at >= day && ev.at < next && !(ev.done && !s.showPast))
-        // All-day items first, then by time.
-        .sort((a, b) => (b.allDay - a.allDay) || (a.at - b.at));
+        // Finished (or already over) at the bottom; otherwise highest priority first.
+        .map((ev) => ({ ...ev, done: ev.done || (!ev.allDay && ev.at < now) }))
+        .sort(wallOrder);
       const label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : day.toLocaleDateString(undefined, { weekday: 'long' });
       const date = day.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
       const weekend = day.getDay() === 0 || day.getDay() === 6;
 
       const list = items.map((ev) => {
-        const done = ev.done || (!ev.allDay && ev.at < now);
+        const done = ev.done;
         const soon = !done && !ev.allDay && ev.at >= now && ev.at - now < 3 * 3600 * 1000;
         const { hue, tag: label } = tint(ev, ctx.data.projects);
         const tag = s.showCategory && label ? `<span class="upc-cat">${ctx.esc(label)}</span>` : '';
@@ -75,17 +77,24 @@ function mountColumns(ctx) {
       const noteHtml = notes.length ? `<ul class="upc-notes">${notes.map((n) => `<li${noteStyle(n)}>${ctx.esc(n.text)}${spanSuffix(n, isoDate(day), i === 0)}</li>`).join('')}</ul>` : '';
       cols += `<section class="upc-col${i === 0 ? ' today' : ''}${weekend ? ' weekend' : ''}">
         <header><span class="upc-label">${label}</span><span class="upc-date">${date}</span></header>
-        ${noteHtml}
-        ${items.length ? `<ol>${list}</ol><div class="upc-more" hidden></div>` : notes.length ? '' : '<p class="upc-free">Nothing planned</p>'}
+        ${items.length || notes.length ? `<div class="upc-body as-view"><div class="upc-track as-track">${noteHtml}${items.length ? `<ol>${list}</ol>` : ''}</div></div>
+        <div class="upc-more" hidden></div>` : '<p class="upc-free">Nothing planned</p>'}
       </section>`;
     }
-    ctx.el.innerHTML = `<div class="upc" style="--n:${n}">${title(ctx)}<div class="upc-cols">${cols}</div></div>`;
-    collapseOverflow();
+    const html = `<div class="upc" style="--n:${n}">${title(ctx)}<div class="upc-cols">${cols}</div></div>`;
+    if (html === lastHtml) return; // nothing changed: leave any scrolling alone
+    lastHtml = html;
+    ctx.el.innerHTML = html;
+    fit();
   };
+  let lastHtml = '';
 
-  // Hide events that don't fit in a column and say how many are hidden.
-  const collapseOverflow = () => {
+  // Columns with more than fits either scroll slowly, or hide the rest behind "+3 more".
+  const fit = () => {
     for (const col of ctx.el.querySelectorAll('.upc-col')) {
+      const body = col.querySelector('.upc-body');
+      if (!body) continue;
+      if (s.scroll !== 'off') { autoScroll(body, { speed: SPEEDS[s.scroll] || SPEEDS.slow }); continue; }
       const ol = col.querySelector('ol');
       const more = col.querySelector('.upc-more');
       if (!ol) continue;
@@ -93,7 +102,7 @@ function mountColumns(ctx) {
       let hidden = 0;
       more.hidden = false;
       more.textContent = '+0 more';
-      const limit = more.getBoundingClientRect().top;
+      const limit = body.getBoundingClientRect().bottom;
       for (const li of items) {
         if (li.getBoundingClientRect().bottom > limit + 1) { li.hidden = true; hidden++; }
       }
@@ -101,7 +110,7 @@ function mountColumns(ctx) {
       while (hidden && hidden < items.length) {
         const visible = items.filter((li) => !li.hidden);
         const last = visible.at(-1);
-        if (last && last.getBoundingClientRect().bottom > more.getBoundingClientRect().top + 1) { last.hidden = true; hidden++; }
+        if (last && last.getBoundingClientRect().bottom > body.getBoundingClientRect().bottom + 1) { last.hidden = true; hidden++; }
         else break;
       }
       if (hidden) more.textContent = `+${hidden} more`;
@@ -111,11 +120,15 @@ function mountColumns(ctx) {
 
   ctx.every(60000, draw, { align: true });
   // Re-measure when the panel is resized (in the editor, or if the window changes).
-  const ro = 'ResizeObserver' in window ? new ResizeObserver(() => draw()) : null;
+  let size = '';
+  const ro = 'ResizeObserver' in window ? new ResizeObserver(() => {
+    const now = `${ctx.el.clientWidth}x${ctx.el.clientHeight}`;
+    if (now !== size) { size = now; lastHtml = ''; draw(); }
+  }) : null;
   ro?.observe(ctx.el);
   // Web fonts can arrive after the first draw and change line heights.
-  document.fonts?.ready.then(() => collapseOverflow());
-  return { destroy() { ro?.disconnect(); } };
+  document.fonts?.ready.then(() => { lastHtml = ''; draw(); });
+  return { destroy() { ro?.disconnect(); ctx.el.querySelectorAll('.as-view').forEach(stopScroll); } };
 }
 
 registerPanel({
@@ -132,7 +145,7 @@ registerPanel({
       { value: 'columns', label: 'Columns: today and the next few days side by side' },
     ] },
     { key: 'days', label: 'Days ahead', type: 'number', default: 14, min: 1, max: 365, showIf: { layout: 'list' } },
-    { key: 'max', label: 'Most items to show', type: 'number', default: 7, min: 1, max: 30, showIf: { layout: 'list' } },
+    { key: 'max', label: 'Most items to show', type: 'number', default: 60, min: 1, max: 200, showIf: { layout: 'list' } },
     { key: 'columns', label: 'Number of days', type: 'number', default: 4, min: 2, max: 7, showIf: { layout: 'columns' },
       help: 'Starts with today. Wider panels fit more days.' },
     { key: 'showPast', label: 'Keep finished and ticked-off items, dimmed', type: 'toggle', default: true, showIf: { layout: 'columns' } },
@@ -142,6 +155,10 @@ registerPanel({
       { value: 'notes', label: 'Day notes' }, { value: 'time', label: 'Times' }, { value: 'category', label: 'Category tags' },
       { value: 'due', label: 'Due dates' }, { value: 'priority', label: 'Priority marks (!!)' },
     ], legacy: { notes: 'showNotes', category: 'showCategory' } },
+    { key: 'scroll', label: 'When there’s more than fits', type: 'select', default: 'slow', options: [
+      { value: 'slow', label: 'Scroll through slowly' }, { value: 'normal', label: 'Scroll a little faster' },
+      { value: 'fast', label: 'Scroll fast' }, { value: 'off', label: 'Don’t scroll (show “+3 more”)' },
+    ], help: 'Long lists move up slowly and loop, pausing at the top.' },
     { key: 'hour24', label: '24-hour times', type: 'toggle', default: false },
   ],
 
@@ -182,18 +199,36 @@ registerPanel({
         const notes = s.showNotes ? notesForDay(ctx.data.notes, key) : [];
         html += `<div class="up-day">${dayLabel(parseLocal(key), now)}</div>`;
         if (notes.length) html += `<ul class="up-notes">${notes.map((n) => `<li${noteStyle(n)}>${ctx.esc(n.text)}${spanSuffix(n, key, key === dayKeys[0])}</li>`).join('')}</ul>`;
-        const rows = list.filter((x) => x.day === key);
+        const rows = list.filter((x) => x.day === key).sort(wallOrder);
         if (rows.length) html += `<ol>${rows.map(row).join('')}</ol>`;
       }
-      ctx.el.innerHTML = `<div class="up${s.show.time ? '' : ' no-time'}">${title(ctx)}<div class="up-list">${html}</div></div>`;
+      const out = `<div class="up${s.show.time ? '' : ' no-time'}">${title(ctx)}<div class="up-list as-view"><div class="up-track as-track">${html}</div></div></div>`;
+      if (out === lastHtml) return;
+      lastHtml = out;
+      ctx.el.innerHTML = out;
+      fit();
+    };
+    let lastHtml = '';
+    const fit = () => {
+      const view = ctx.el.querySelector('.up-list');
+      if (view && s.scroll !== 'off') autoScroll(view, { speed: SPEEDS[s.scroll] || SPEEDS.slow });
     };
     ctx.every(60000, draw, { align: true });
+    let size = '';
+    const ro = 'ResizeObserver' in window ? new ResizeObserver(() => {
+      const now = `${ctx.el.clientWidth}x${ctx.el.clientHeight}`;
+      if (now !== size) { size = now; fit(); }
+    }) : null;
+    ro?.observe(ctx.el);
+    document.fonts?.ready.then(fit);
+    return { destroy() { ro?.disconnect(); ctx.el.querySelectorAll('.as-view').forEach(stopScroll); } };
   },
 
   css: `
     .up { height: 100%; display: flex; flex-direction: column; gap: 3cqh; }
-    .up-list { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 1.2cqh;
-      mask-image: linear-gradient(to bottom, #000 85%, transparent); }
+    .up-list { flex: 1; min-height: 0; overflow: hidden; mask-image: linear-gradient(to bottom, #000 85%, transparent); }
+    .up-track { display: flex; flex-direction: column; gap: 1.2cqh; will-change: transform; }
+    .as-view.as-on { mask-image: linear-gradient(to bottom, transparent, #000 6%, #000 90%, transparent); }
     .up-day { font-size: min(4.6cqh, 3.4cqw); color: var(--accent); font-weight: 600; margin-top: 1.4cqh; }
     .up-day:first-child { margin-top: 0; }
     .up-notes, .upc-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3em; flex: none; }
@@ -237,8 +272,10 @@ registerPanel({
     .upc-date { font-size: calc(var(--fs) * .78); color: var(--text-faint); }
     .upc-col.today .upc-label { color: var(--accent); }
     .upc-col.weekend .upc-date { color: var(--text-dim); }
-    .upc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: calc(var(--fs) * .75);
-      min-height: 0; overflow: hidden; }
+    .upc-body { flex: 1; min-height: 0; overflow: hidden; }
+    .upc-track { display: flex; flex-direction: column; gap: calc(var(--fs) * .8); }
+    .upc-track > ol + ol, .upc-track > [data-as-clone] + [data-as-clone] { margin-top: 0; }
+    .upc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: calc(var(--fs) * .75); }
     .upc li { display: flex; flex-direction: column; gap: .15em; padding-left: .7em;
       border-left: 2px solid hsl(var(--h) 45% 62% / .75); font-size: var(--fs); line-height: 1.25; }
     .upc li[hidden] { display: none; }

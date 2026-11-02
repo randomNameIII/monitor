@@ -227,6 +227,7 @@ main { flex: 1; min-height: 0; display: flex; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
 .row input { flex: 1; min-width: 220px; width: auto; }
 .ok-text { color: var(--ok); font-weight: 600; }
+.warn-text { color: var(--ember, #ffb38a); font-size: 13px; line-height: 1.5; margin: 0; }
 
 .steps ol { list-style: none; counter-reset: step; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 20px; }
 .steps li { counter-increment: step; position: relative; padding-left: 44px; }

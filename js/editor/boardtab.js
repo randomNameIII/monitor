@@ -91,5 +91,5 @@ function clampPanels() {
 
 export function initBoardTab() {
   render();
-  onChange((reason) => { if (['history', 'replace'].includes(reason)) render(); });
+  onChange((reason) => { if (['history', 'replace', 'remote'].includes(reason)) render(); });
 }

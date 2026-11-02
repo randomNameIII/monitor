@@ -17,6 +17,17 @@ import { isoDate, addDays, weekStartOf, parseLocal, daysBetween, occurrences } f
 
 export const isGoalDone = (g) => (g.count || 0) >= (g.target || 1);
 
+// How the wall orders one day's items: unfinished first, then highest priority, then things without
+// a time (in the order you put them in the planner), then the rest by time.
+export function wallOrder(a, b) {
+  if (!!a.done !== !!b.done) return a.done ? 1 : -1;
+  const p = (b.priority || 0) - (a.priority || 0);
+  if (p) return p;
+  if (!a.time !== !b.time) return a.time ? 1 : -1;
+  if (!a.time) return (a.order ?? 0) - (b.order ?? 0);
+  return a.time.localeCompare(b.time);
+}
+
 export function byOrder(a, b) {
   return (a.order ?? 0) - (b.order ?? 0);
 }

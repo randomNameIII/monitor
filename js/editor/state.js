@@ -1,7 +1,8 @@
 // Editor state: the working config, selection, undo history and publishing.
 
 import { defaultConfig, normalize } from '../core/config.js';
-import { saveLocal, loadLocal, publishGist, store } from '../core/sync.js';
+import { saveLocal, loadLocal, publishGist, fetchGist, store } from '../core/sync.js';
+import { mergeBoards } from '../core/merge.js';
 
 export const prefs = {
   get token() { return store.get('dusk.editor.token') || ''; },
@@ -12,6 +13,9 @@ export const prefs = {
   set autopublish(v) { store.set('dusk.editor.autopublish', v ? 'on' : 'off'); },
   get publishedAt() { return store.get('dusk.editor.publishedAt') || ''; },
   set publishedAt(v) { store.set('dusk.editor.publishedAt', v); },
+  // The last version this browser and the gist had in common, for merging changes from other computers.
+  get base() { try { return JSON.parse(store.get('dusk.editor.base')) || null; } catch { return null; } },
+  set base(v) { v ? store.set('dusk.editor.base', JSON.stringify(v)) : store.del('dusk.editor.base'); },
 };
 
 export const state = {
@@ -93,7 +97,7 @@ export function select(id) {
   emit('select');
 }
 
-/* ---- publishing to the gist ---- */
+/* ---- publishing to the gist, and changes from other computers ---- */
 let pubTimer = null;
 export function isDirty() { return prefs.publishedAt !== state.cfg.updatedAt; }
 
@@ -102,14 +106,68 @@ function schedulePublish() {
   if (prefs.autopublish && prefs.token && prefs.gist) pubTimer = setTimeout(() => publish().catch(() => {}), 4000);
 }
 
+// Take the gist's board as it is (nothing unpublished here to keep). One undo step.
+export function adoptRemote(cfg) {
+  past.push(lastSnap);
+  future.length = 0;
+  state.cfg = normalize(cfg);
+  lastSnap = JSON.stringify(state.cfg);
+  if (!state.cfg.panels.some((p) => p.id === state.selected)) state.selected = null;
+  saveLocal(state.cfg);
+  prefs.publishedAt = state.cfg.updatedAt;
+  prefs.base = state.cfg;
+  emit('remote');
+}
+
+// Fold another computer's changes into the board here. Returns true if anything changed.
+export function mergeRemote(remote) {
+  const merged = normalize(mergeBoards(prefs.base, state.cfg, remote));
+  prefs.base = remote; // from now on, both sides share the gist's version
+  if (JSON.stringify(merged) === JSON.stringify(remote)) { adoptRemote(remote); return true; }
+  past.push(lastSnap);
+  future.length = 0;
+  state.cfg = merged;
+  state.cfg.updatedAt = new Date().toISOString();
+  lastSnap = JSON.stringify(state.cfg);
+  if (!state.cfg.panels.some((p) => p.id === state.selected)) state.selected = null;
+  saveLocal(state.cfg);
+  emit('remote');
+  return true;
+}
+
+/**
+ * Look for changes another computer published.
+ * @returns {Promise<'none'|'adopted'|'merged'>}
+ */
+export async function checkRemote() {
+  // Never synced in this browser yet (the board here may be the sample): loading or connecting decides.
+  if (!prefs.token || !prefs.gist || state.publishing || !prefs.publishedAt) return 'none';
+  const remote = await fetchGist(prefs.gist, prefs.token);
+  if (state.publishing) return 'none';
+  if (remote.updatedAt === prefs.publishedAt) {
+    if (!prefs.base) prefs.base = remote;
+    return 'none';
+  }
+  if (!isDirty()) { adoptRemote(remote); return 'adopted'; }
+  mergeRemote(remote);
+  schedulePublish();
+  return 'merged';
+}
+
 export async function publish() {
   clearTimeout(pubTimer);
   if (!prefs.token || !prefs.gist) throw new Error('Set up GitHub sync in the Sync tab first.');
   state.publishing = true; state.publishError = ''; emit('publish');
-  const stamp = state.cfg.updatedAt;
   try {
-    await publishGist(prefs.token, prefs.gist, state.cfg);
+    // Someone may have published from another computer since we last looked: bring that in first.
+    const remote = await fetchGist(prefs.gist, prefs.token);
+    if (remote.updatedAt !== prefs.publishedAt) mergeRemote(remote);
+    if (prefs.publishedAt === state.cfg.updatedAt) return; // the gist already has exactly this
+    const stamp = state.cfg.updatedAt;
+    const sent = JSON.parse(JSON.stringify(state.cfg));
+    await publishGist(prefs.token, prefs.gist, sent);
     prefs.publishedAt = stamp;
+    prefs.base = sent;
   } catch (e) {
     state.publishError = e.message;
     throw e;
