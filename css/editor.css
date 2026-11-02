@@ -126,10 +126,10 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--u
 .check-chip.on { color: var(--text); background: var(--ui-raised); border-style: solid; text-decoration: none; }
 .check-chip.on::before { background: var(--ui-accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2 5 8.5l4.5-5' fill='none' stroke='%230b1230' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/100% no-repeat; border-color: var(--ui-accent); }
 .check-chip:hover { border-color: var(--ui-accent); }
-.seg { display: inline-flex; background: var(--ui-input); border: 1px solid var(--ui-border-strong); border-radius: 9px; padding: 2px; gap: 2px; align-self: flex-start; }
-.seg button { font: 500 13px var(--font-ui); color: var(--text-dim); background: none; border: 0; border-radius: 7px; padding: 5px 11px; cursor: pointer; }
-.seg button:hover { color: var(--text); }
-.seg button.on { background: var(--ui-raised); color: var(--text); box-shadow: inset 0 0 0 1px var(--ui-border-strong); }
+.iseg { display: inline-flex; background: var(--ui-input); border: 1px solid var(--ui-border-strong); border-radius: 9px; padding: 2px; gap: 2px; align-self: flex-start; }
+.iseg button { font: 500 13px var(--font-ui); color: var(--text-dim); background: none; border: 0; border-radius: 7px; padding: 5px 11px; cursor: pointer; }
+.iseg button:hover { color: var(--text); }
+.iseg button.on { background: var(--ui-raised); color: var(--text); box-shadow: inset 0 0 0 1px var(--ui-border-strong); }
 
 .range-row { display: flex; align-items: center; gap: 12px; }
 .range-row input { flex: 1; accent-color: var(--ui-accent); }

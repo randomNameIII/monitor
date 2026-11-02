@@ -253,7 +253,7 @@ function renderInspector() {
 
 // A small row of buttons, one of which is pressed.
 function segmented(label, options, value, onPick) {
-  const row = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': label });
+  const row = h('div', { class: 'iseg', role: 'radiogroup', 'aria-label': label });
   const draw = (v) => {
     for (const b of row.children) { const on = b.dataset.v === v; b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false'); }
   };
@@ -261,7 +261,7 @@ function segmented(label, options, value, onPick) {
     row.append(h('button', { type: 'button', role: 'radio', 'data-v': v, onClick: () => { draw(v); onPick(v); } }, text));
   }
   draw(value);
-  return h('div', { class: 'field field-seg' }, h('div', { class: 'checks-label' }, label), row);
+  return h('div', { class: 'field field-iseg' }, h('div', { class: 'checks-label' }, label), row);
 }
 
 function deleteBtn(p) {

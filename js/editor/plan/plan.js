@@ -9,9 +9,9 @@ import { uid } from '../../core/config.js';
 import * as M from './model.js';
 import { parseQuick } from './parse.js';
 import { enableDrag, edgeScroller } from './drag.js';
-import { enableMarquee, paintSelection, clearSelection, toggleSelected, isSelected, selectedItems, selectionSize, setSelection, keyOf, onSelectionChange } from './select.js';
+import { enableMarquee, paintSelection, clearSelection, toggleSelected, isSelected, selectedItems, selectionSize, setSelection, keyOf, onSelectionChange, setSelectFilter, canSelect } from './select.js';
 import { openMenu, closeMenu } from './menu.js';
-import { closePopover } from './popover.js';
+import { closePopover, openPopover } from './popover.js';
 import { editTask, editGoal, editProject, editCategory, editNoteDetails, deleteWithUndo, editDueDates, setDueDates, dueChoices } from './editors.js';
 import { openQuickAdd, setQuickAddHandler, isQuickAddOpen, resolveLine, createParsed, addLines } from './quickadd.js';
 import { cleanLines } from './editors.js';
@@ -850,7 +850,7 @@ function selectionMenu(e) {
 
 function selectVisible() {
   if (view === 'month') {
-    setSelection([...monthEl.querySelectorAll('.mday:not(.out) [data-drag="task"]')].map(keyOf));
+    setSelection([...monthEl.querySelectorAll('.mday:not(.out) [data-drag="task"]')].filter(canSelect).map(keyOf));
     return;
   }
   const { first, last } = visibleRange();
@@ -858,9 +858,153 @@ function selectVisible() {
   for (const el of weekEl.querySelectorAll('[data-drag="task"], [data-drag="day-goal"]')) {
     const day = el.dataset.day || el.closest('[data-day]')?.dataset.day;
     const i = day ? indexOf(day) : -1;
-    if (i >= first && i <= last) keys.push(keyOf(el));
+    if (i >= first && i <= last && canSelect(el)) keys.push(keyOf(el));
   }
   setSelection(keys);
+}
+
+/* ----------------------------- select by category / dates ----------------------------- */
+// "Select…": pick categories, a date range and done/not done. Then either select every matching task
+// (including ones off screen), or turn it into a filter so box-select, Ctrl+A and Ctrl-click only pick
+// up matching tasks while everything else is dimmed.
+
+let selFilter = null; // { cats: [], from: '', to: '', status: 'open'|'done'|'all', text: '' }
+let lastPick = null;  // the window reopens with what you chose last time
+
+function taskMatches(t, day, f) {
+  if (f.cats.length && !f.cats.some((c) => c.toLowerCase() === (t.category || '').toLowerCase())) return false;
+  if (f.text && !t.title.toLowerCase().includes(f.text.toLowerCase())) return false;
+  const d = day || t.date || '';
+  if ((f.from || f.to) && (!d || (f.from && d < f.from) || (f.to && d > f.to))) return false;
+  const done = d ? M.isTaskDoneOn(t, d) : !!t.done;
+  return f.status === 'all' || (f.status === 'done') === done;
+}
+
+// Every matching task as selection keys. Repeating tasks count once per day in the range; with no
+// range, the days currently loaded on the board.
+function matchingKeys(f) {
+  const keys = [];
+  const loadedFrom = isoDate(rangeStart), loadedTo = isoDate(addDays(rangeStart, rangeDays() - 1));
+  for (const t of ev()) {
+    if (!t.date) { if (!f.from && !f.to && taskMatches(t, '', f)) keys.push(`t:${t.id}:`); continue; }
+    if (!t.repeat || t.repeat === 'none') { if (taskMatches(t, t.date, f)) keys.push(`t:${t.id}:${t.date}`); continue; }
+    const from = f.from || (f.to && f.to < loadedFrom ? t.date : loadedFrom);
+    const to = f.to || (f.from && f.from > loadedTo ? isoDate(addDays(parseLocal(f.from), 60)) : loadedTo);
+    if (to < from) continue;
+    const days = daysBetween(parseLocal(from), parseLocal(to)) + 1;
+    for (const o of occurrences([t], { from: parseLocal(from), days })) {
+      if (o.day >= from && o.day <= to && taskMatches(t, o.day, f)) keys.push(`t:${t.id}:${o.day}`);
+    }
+  }
+  return keys;
+}
+
+const shortDate = (k) => parseLocal(k).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+function filterLabel(f) {
+  const parts = [];
+  if (f.cats.length) parts.push(f.cats.map((c) => `#${c}`).join(', '));
+  if (f.text) parts.push(`“${f.text}”`);
+  if (f.from || f.to) parts.push(f.from && f.to ? `${shortDate(f.from)} – ${shortDate(f.to)}` : f.from ? `from ${shortDate(f.from)}` : `until ${shortDate(f.to)}`);
+  if (f.status !== 'all') parts.push(f.status === 'done' ? 'done' : 'not done');
+  return parts.join(' · ') || 'all tasks';
+}
+
+function applySelectFilter(f) {
+  selFilter = f;
+  setSelectFilter(f ? (el) => {
+    if (el.dataset.drag !== 'task') return false;
+    const t = M.findTask(el.dataset.id);
+    return !!t && taskMatches(t, el.dataset.day || '', f);
+  } : null);
+  // Keep only the selected tasks that match.
+  if (f && selectionSize()) {
+    setSelection(selectedItems().filter((x) => x.kind === 'task' && M.findTask(x.id) && taskMatches(M.findTask(x.id), x.day, f)).map((x) => `t:${x.id}:${x.day}`));
+  }
+  root.classList.toggle('filtering', !!f);
+  paintSelection(root);
+  renderFilterButton();
+}
+
+function renderFilterButton() {
+  const btn = $('planSelect');
+  const off = $('planSelectOff');
+  if (!btn) return;
+  btn.classList.toggle('on', !!selFilter);
+  btn.querySelector('span').textContent = selFilter ? `Only ${filterLabel(selFilter)}` : 'Select…';
+  btn.title = selFilter ? 'Change what you can select' : 'Select tasks by category, dates or done (S)';
+  off.hidden = !selFilter;
+}
+
+function selectAllMatching(f) {
+  const keys = matchingKeys(f);
+  setSelection(keys);
+  const onScreen = keys.filter((k) => root.querySelector(`[data-drag="task"][data-id="${k.split(':')[1]}"][data-day="${k.split(':')[2]}"]`)).length;
+  const off = keys.length - onScreen;
+  toast(keys.length ? `Selected ${keys.length} task${keys.length === 1 ? '' : 's'}${off > 0 && view !== 'list' ? ` (${off} not on screen)` : ''}` : 'Nothing matches', !keys.length);
+}
+
+export function openSelectFilter(anchor = $('planSelect'), preset = {}) {
+  const today = startOfDay(new Date());
+  const f = { cats: [], from: '', to: '', status: 'open', text: '', ...(selFilter || lastPick || {}), ...preset };
+  lastPick = f;
+  const cats = [...new Set(ev().map((x) => x.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const wk = weekStartOf(today, ws());
+  const ranges = [
+    ['Any time', '', ''],
+    ['This week', isoDate(wk), isoDate(addDays(wk, 6))],
+    ['Next 7 days', isoDate(today), isoDate(addDays(today, 6))],
+    ['Next 14 days', isoDate(today), isoDate(addDays(today, 13))],
+    ['This month', isoDate(new Date(today.getFullYear(), today.getMonth(), 1)), isoDate(new Date(today.getFullYear(), today.getMonth() + 1, 0))],
+  ];
+  openPopover(anchor, (el) => {
+    el.classList.add('pop-select');
+    const draw = () => {
+      const n = matchingKeys(f).length;
+      el.innerHTML = `
+        <div class="pop-head">Select tasks</div>
+        <div class="pf"><span>Category${f.cats.length ? `<button type="button" class="link pf-clear" data-f="anycat">Any</button>` : ''}</span>
+          <div class="sf-cats">${cats.length ? cats.map((c) => `<button type="button" class="sf-cat${f.cats.some((x) => x.toLowerCase() === c.toLowerCase()) ? ' on' : ''}" data-cat="${esc(c)}" style="--h:${catHue(c)}">#${esc(c)}</button>`).join('') : '<span class="muted">No categories yet</span>'}</div>
+        </div>
+        <div class="pf"><span>Dates</span>
+          <div class="sf-ranges">${ranges.map(([l, a, b]) => `<button type="button" class="sf-range${f.from === a && f.to === b ? ' on' : ''}" data-from="${a}" data-to="${b}">${l}</button>`).join('')}</div>
+          <div class="sf-dates"><input type="date" data-f="from" value="${esc(f.from)}" aria-label="From"><i>to</i><input type="date" data-f="to" value="${esc(f.to)}" aria-label="To"></div>
+        </div>
+        <div class="pop-grid">
+          <div class="pf"><span>Include</span><div class="seg" data-f="status">${[['open', 'Not done'], ['done', 'Done'], ['all', 'Both']].map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${f.status === v}">${l}</button>`).join('')}</div></div>
+          <label class="pf"><span>Title contains</span><input data-f="text" value="${esc(f.text)}" placeholder="anything"></label>
+        </div>
+        <p class="sf-count"><b>${n}</b> task${n === 1 ? '' : 's'} match: ${esc(filterLabel(f))}</p>
+        <div class="sf-actions">
+          <button type="button" class="btn primary small" data-f="selectAll" ${n ? '' : 'disabled'}>Select ${n === 1 ? 'it' : `all ${n}`}</button>
+          <button type="button" class="btn small" data-f="limit" title="Box-select, Ctrl+A and Ctrl-click only pick up matching tasks; the rest are dimmed">${selFilter ? 'Update the filter' : 'Only let me select these'}</button>
+          ${selFilter ? '<button type="button" class="link" data-f="off">Turn the filter off</button>' : ''}
+        </div>`;
+      const q = (k) => el.querySelector(`[data-f="${k}"]`);
+      el.querySelectorAll('.sf-cat').forEach((b) => b.addEventListener('click', () => {
+        const c = b.dataset.cat;
+        f.cats = f.cats.some((x) => x.toLowerCase() === c.toLowerCase()) ? f.cats.filter((x) => x.toLowerCase() !== c.toLowerCase()) : [...f.cats, c];
+        draw();
+      }));
+      q('anycat')?.addEventListener('click', () => { f.cats = []; draw(); });
+      el.querySelectorAll('.sf-range').forEach((b) => b.addEventListener('click', () => { f.from = b.dataset.from; f.to = b.dataset.to; draw(); }));
+      for (const k of ['from', 'to']) q(k).addEventListener('change', (e) => {
+        f[k] = e.target.value;
+        if (f.from && f.to && f.to < f.from) [f.from, f.to] = [f.to, f.from];
+        draw();
+      });
+      q('status').addEventListener('click', (e) => { const b = e.target.closest('[data-v]'); if (b) { f.status = b.dataset.v; draw(); } });
+      q('text').addEventListener('input', (e) => {
+        f.text = e.target.value;
+        const pos = e.target.selectionStart;
+        draw();
+        const t = q('text'); t.focus(); t.setSelectionRange(pos, pos);
+      });
+      q('selectAll').addEventListener('click', () => { closePopover(); selectAllMatching({ ...f }); });
+      q('limit').addEventListener('click', () => { closePopover(); applySelectFilter({ ...f }); toast(`Only ${filterLabel(f)} can be selected now. Press Esc twice or click × to turn it off.`); });
+      q('off')?.addEventListener('click', () => { closePopover(); applySelectFilter(null); });
+    };
+    draw();
+  }, { key: 'select-filter', width: 380 });
 }
 
 /* ====================================================================== */
@@ -1102,7 +1246,7 @@ function onClick(e) {
     return;
   }
   if (a === 'open-day') { openDay(act.dataset.day); return; }
-  if (a === 'cat-edit') { editCategory(act, act.dataset.cat, catHue); return; }
+  if (a === 'cat-edit') { editCategory(act, act.dataset.cat, catHue, { onSelect: (c) => openSelectFilter($('planSelect'), { cats: [c] }) }); return; }
   if (a === 'sel-clear') { clearSelection(); return; }
   if (a === 'sel-menu') { const r = act.getBoundingClientRect(); selectionMenu({ preventDefault() {}, target: act, clientX: r.left, clientY: r.bottom + 6, detail: e.detail }); return; }
   if (a === 'sel-done') { bulkDone(); return; }
@@ -1357,6 +1501,7 @@ function runAction(id) {
     case 'viewMonth': setView('month'); return true;
     case 'viewList': setView('list'); return true;
     case 'selectAll': if (view === 'list') return false; selectVisible(); return true;
+    case 'selectBy': openSelectFilter(); return true;
     case 'shortcuts': openShortcuts(); return true;
   }
   if (!multi && !it) return false;
@@ -1439,6 +1584,7 @@ function onKey(e) {
   }
   if (!visible() || inField || overlay) return;
   if (e.key === 'Escape' && selectionSize()) { clearSelection(); return; }
+  if (e.key === 'Escape' && selFilter) { applySelectFilter(null); toast('Selection filter off'); return; }
   if (action && runAction(action)) { e.preventDefault(); }
 }
 
@@ -1606,6 +1752,8 @@ export function initPlan() {
     }
   }, true);
   $('planKeys').addEventListener('click', openShortcuts);
+  $('planSelect').addEventListener('click', () => openSelectFilter());
+  $('planSelectOff').addEventListener('click', () => { applySelectFilter(null); toast('Selection filter off'); });
 
   // Hovering (or focusing) a task with a due date lights up that day and says how far away it is.
   let dueFor = null;

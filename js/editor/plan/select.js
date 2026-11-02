@@ -10,6 +10,10 @@ import { edgeScroller } from './drag.js';
 
 const selected = new Set();
 let listeners = [];
+// Optional filter ("only #Math tasks"): when set, box-select, Ctrl+A and Ctrl-click only take items it accepts.
+let filter = null;
+export function setSelectFilter(fn) { filter = fn || null; }
+export const canSelect = (el) => !filter || filter(el);
 
 export const keyOf = (el) => (el.dataset.drag === 'task' ? `t:${el.dataset.id}:${el.dataset.day || ''}` : `g:${el.dataset.id}`);
 export const isSelected = (el) => selected.has(keyOf(el));
@@ -37,6 +41,7 @@ export function setSelection(keys) {
   changed();
 }
 export function toggleSelected(el) {
+  if (!canSelect(el)) return;
   const k = keyOf(el);
   selected.has(k) ? selected.delete(k) : selected.add(k);
   changed();
@@ -47,6 +52,7 @@ export function toggleSelected(el) {
 export function paintSelection(root) {
   for (const el of root.querySelectorAll('[data-drag="task"], [data-drag="day-goal"]')) {
     el.classList.toggle('selected', selected.has(keyOf(el)));
+    el.classList.toggle('no-match', !!filter && !filter(el));
   }
 }
 
@@ -110,7 +116,7 @@ export function enableMarquee(area, { canStart }) {
       const ey1 = er.top - r.top + area.scrollTop, ey2 = er.bottom - r.top + area.scrollTop;
       const hit = ex1 < x2 && ex2 > x1 && ey1 < y2 && ey2 > y1;
       const k = keyOf(el);
-      if (hit) keys.add(k);
+      if (hit && canSelect(el)) keys.add(k);
       el.classList.toggle('selected', keys.has(k));
     }
     selected.clear();

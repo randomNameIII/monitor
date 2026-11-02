@@ -619,6 +619,28 @@ body.is-panning, body.is-panning * { cursor: grabbing !important; user-select: n
 
 /* ---------- shortcuts window ---------- */
 .keys-btn { gap: 7px; flex: none; }
+/* Select… (filter) */
+.sel-filter { display: flex; align-items: center; gap: 2px; flex: none; min-width: 0; }
+#planSelect { gap: 7px; max-width: 320px; }
+#planSelect span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#planSelect svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; }
+#planSelect.on { color: var(--ui-accent-ink); background: var(--ui-accent); border-color: var(--ui-accent); }
+#planSelectOff svg { width: 15px; height: 15px; }
+.filtering .no-match { opacity: .28; filter: saturate(.4); }
+.filtering .no-match:hover { opacity: .5; }
+.pop-select .sf-cats, .pop-select .sf-ranges { display: flex; flex-wrap: wrap; gap: 5px; }
+.sf-cat, .sf-range { font: 600 12.5px var(--font-ui); padding: 4px 10px; border-radius: 99px; cursor: pointer;
+  background: transparent; color: var(--text-dim); border: 1px solid var(--ui-border-strong); }
+.sf-cat { color: hsl(var(--h) 55% 74%); border-color: hsl(var(--h) 40% 50% / .45); }
+.sf-cat.on { background: hsl(var(--h) 45% 55% / .22); border-color: hsl(var(--h) 55% 65%); color: hsl(var(--h) 70% 86%); }
+.sf-range.on { background: var(--ui-raised); color: var(--text); border-color: var(--ui-accent); }
+.sf-cat:hover, .sf-range:hover { border-color: var(--ui-accent); }
+.sf-dates { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.sf-dates input { flex: 1; min-width: 0; }
+.sf-dates i { font-style: normal; color: var(--text-faint); font-size: 12px; }
+.sf-count { margin: 0; font-size: 13px; color: var(--text-dim); }
+.sf-count b { color: var(--text); font-size: 15px; }
+.sf-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-top: 1px solid var(--ui-border); padding-top: 12px; }
 .keys-btn svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
 .keys-backdrop {
   position: fixed; inset: 0; z-index: 1900; background: rgba(4, 6, 14, .62);
@@ -670,3 +692,4 @@ body.is-panning, body.is-panning * { cursor: grabbing !important; user-select: n
 @media (prefers-reduced-motion: reduce) {
   .flash, .ctx, .pop, .qa, .qa-backdrop { animation: none !important; }
 }
+.pop-select .seg button { white-space: nowrap; padding-left: 9px; padding-right: 9px; }

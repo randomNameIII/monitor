@@ -40,6 +40,7 @@ export const ACTIONS = [
   { id: 'p3', group: 'The selected or focused item', label: 'Priority !!!', keys: ['3'] },
   { id: 'menu', group: 'The selected or focused item', label: 'Open the right-click menu', keys: ['ContextMenu', 'Shift+F10'] },
   { id: 'selectAll', group: 'Selecting', label: 'Select everything on screen', keys: ['Ctrl+A'] },
+  { id: 'selectBy', group: 'Selecting', label: 'Select by category, dates or done…', keys: ['S'] },
   { id: 'shortcuts', group: 'Selecting', label: 'Show these shortcuts', keys: ['?'] },
 ];
 

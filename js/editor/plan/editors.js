@@ -289,7 +289,7 @@ export function editNoteDetails(anchor, id, { focusEnd = false, day = null } = {
 
 const CAT_HUES = [0, 20, 38, 55, 90, 140, 170, 195, 215, 240, 270, 300, 330];
 
-export function editCategory(anchor, name, hueOf) {
+export function editCategory(anchor, name, hueOf, { onSelect } = {}) {
   let current = name;
   openPopover(anchor, (el) => {
     const count = [...state.cfg.data.events, ...(state.cfg.data.notes || [])].filter((e) => (e.category || '').toLowerCase() === name.toLowerCase()).length;
@@ -305,6 +305,7 @@ export function editCategory(anchor, name, hueOf) {
         <div class="range-row"><input type="range" min="0" max="359" step="1" data-f="hue" value="${hueOf(name)}" aria-label="Exact color"><i class="cat-swatch" style="--h:${hueOf(name)}"></i></div>
       </div>
       <div class="pop-actions">
+        ${onSelect ? '<button type="button" class="btn small" data-f="select">Select these tasks…</button>' : ''}
         <span class="spacer"></span>
         <button type="button" class="btn danger small" data-f="delete">Remove category</button>
       </div>`;
@@ -332,6 +333,7 @@ export function editCategory(anchor, name, hueOf) {
     q('name').addEventListener('change', rename);
     q('name').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); rename(); closePopover(); } });
     q('delete').addEventListener('click', () => deleteWithUndo(current, () => M.deleteCategory(current)));
+    q('select')?.addEventListener('click', () => { closePopover(); onSelect(current); });
     paint();
   }, { key: `cat:${name}`, width: 320 });
 }
