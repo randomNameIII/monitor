@@ -1,7 +1,6 @@
 import { registerPanel } from '../core/registry.js';
 import { occurrences, dayLabel, formatTime, formatTimeRange, startOfDay, addDays, isoDate, parseLocal } from '../core/util.js';
 import { notesForDay, categoryHue, wallOrder } from '../core/planning.js';
-import { autoScroll, stopScroll, SPEEDS } from '../core/autoscroll.js';
 
 // Project color wins; otherwise a stable soft color per category name, so "school" is always the same tint.
 function tint(ev, projects) {
@@ -31,6 +30,12 @@ function spanSuffix(n, day, first) {
   if (day === n.end) return '<span class="n-span"> · last day</span>';
   if (first || day === n.start) return `<span class="n-span"> · until ${short(n.end)}</span>`;
   return '';
+}
+
+// "+3 more", "+3 more · 2 done" or "+2 done" for what didn't fit.
+function moreText(open, done) {
+  if (open && done) return `+${open} more · ${done} done`;
+  return open ? `+${open} more` : `+${done} done`;
 }
 
 const title = (ctx) => (ctx.settings.title ? `<h3 class="panel-title">${ctx.esc(ctx.settings.title)}</h3>` : '');
@@ -77,44 +82,36 @@ function mountColumns(ctx) {
       const noteHtml = notes.length ? `<ul class="upc-notes">${notes.map((n) => `<li${noteStyle(n)}>${ctx.esc(n.text)}${spanSuffix(n, isoDate(day), i === 0)}</li>`).join('')}</ul>` : '';
       cols += `<section class="upc-col${i === 0 ? ' today' : ''}${weekend ? ' weekend' : ''}">
         <header><span class="upc-label">${label}</span><span class="upc-date">${date}</span></header>
-        ${items.length || notes.length ? `<div class="upc-body as-view"><div class="upc-track as-track">${noteHtml}${items.length ? `<ol>${list}</ol>` : ''}</div></div>
+        ${items.length || notes.length ? `<div class="upc-body">${noteHtml}${items.length ? `<ol>${list}</ol>` : ''}</div>
         <div class="upc-more" hidden></div>` : '<p class="upc-free">Nothing planned</p>'}
       </section>`;
     }
     const html = `<div class="upc" style="--n:${n}">${title(ctx)}<div class="upc-cols">${cols}</div></div>`;
-    if (html === lastHtml) return; // nothing changed: leave any scrolling alone
+    if (html === lastHtml) return; // nothing changed
     lastHtml = html;
     ctx.el.innerHTML = html;
     fit();
   };
   let lastHtml = '';
 
-  // Columns with more than fits either scroll slowly, or hide the rest behind "+3 more".
+  // Most important first, finished last: when a column is full, the rest is hidden behind "+3 more".
   const fit = () => {
     for (const col of ctx.el.querySelectorAll('.upc-col')) {
       const body = col.querySelector('.upc-body');
-      if (!body) continue;
-      if (s.scroll !== 'off') { autoScroll(body, { speed: SPEEDS[s.scroll] || SPEEDS.slow }); continue; }
-      const ol = col.querySelector('ol');
       const more = col.querySelector('.upc-more');
-      if (!ol) continue;
-      const items = [...ol.children];
-      let hidden = 0;
+      const items = [...(body?.querySelectorAll('ol > li') || [])];
+      if (!items.length) continue;
+      for (const li of items) li.hidden = false;
+      more.hidden = true;
+      if (items.at(-1).getBoundingClientRect().bottom <= body.getBoundingClientRect().bottom + 1) continue;
       more.hidden = false;
-      more.textContent = '+0 more';
-      const limit = body.getBoundingClientRect().bottom;
-      for (const li of items) {
-        if (li.getBoundingClientRect().bottom > limit + 1) { li.hidden = true; hidden++; }
-      }
-      // Once items are hidden the footer moves up; re-check the last visible one still fits.
-      while (hidden && hidden < items.length) {
-        const visible = items.filter((li) => !li.hidden);
-        const last = visible.at(-1);
-        if (last && last.getBoundingClientRect().bottom > body.getBoundingClientRect().bottom + 1) { last.hidden = true; hidden++; }
-        else break;
-      }
-      if (hidden) more.textContent = `+${hidden} more`;
-      else more.hidden = true;
+      more.textContent = moreText(88, 8); // reserve the footer's room before measuring
+      const limit = body.getBoundingClientRect().bottom + 1;
+      const cut = Math.max(0, items.findIndex((li) => li.getBoundingClientRect().bottom > limit));
+      const hidden = items.slice(cut);
+      for (const li of hidden) li.hidden = true;
+      const done = hidden.filter((li) => li.classList.contains('done')).length;
+      more.textContent = moreText(hidden.length - done, done);
     }
   };
 
@@ -128,7 +125,7 @@ function mountColumns(ctx) {
   ro?.observe(ctx.el);
   // Web fonts can arrive after the first draw and change line heights.
   document.fonts?.ready.then(() => { lastHtml = ''; draw(); });
-  return { destroy() { ro?.disconnect(); ctx.el.querySelectorAll('.as-view').forEach(stopScroll); } };
+  return { destroy() { ro?.disconnect(); } };
 }
 
 registerPanel({
@@ -155,10 +152,6 @@ registerPanel({
       { value: 'notes', label: 'Day notes' }, { value: 'time', label: 'Times' }, { value: 'category', label: 'Category tags' },
       { value: 'due', label: 'Due dates' }, { value: 'priority', label: 'Priority marks (!!)' },
     ], legacy: { notes: 'showNotes', category: 'showCategory' } },
-    { key: 'scroll', label: 'When there’s more than fits', type: 'select', default: 'slow', options: [
-      { value: 'slow', label: 'Scroll through slowly' }, { value: 'normal', label: 'Scroll a little faster' },
-      { value: 'fast', label: 'Scroll fast' }, { value: 'off', label: 'Don’t scroll (show “+3 more”)' },
-    ], help: 'Long lists move up slowly and loop, pausing at the top.' },
     { key: 'hour24', label: '24-hour times', type: 'toggle', default: false },
   ],
 
@@ -170,9 +163,13 @@ registerPanel({
     const draw = () => {
       colors = ctx.data.categoryColors || null;
       const now = new Date();
-      const list = occurrences(ctx.data.events, {
+      const everything = occurrences(ctx.data.events, {
         from: now, days: s.days, categories: String(s.categories || '').split(','),
-      }).filter((ev) => !(ev.done && s.hideDone)).slice(0, s.max);
+      }).filter((ev) => !(ev.done && s.hideDone))
+        .sort((a, b) => a.day.localeCompare(b.day) || wallOrder(a, b)); // day by day, most important first
+      const list = everything.slice(0, s.max);
+      const beyond = everything.slice(s.max);
+      extra = { open: beyond.filter((ev) => !ev.done).length, done: beyond.filter((ev) => ev.done).length };
 
       // Day notes show under their day, including days that have notes but no tasks.
       const todayKey = isoDate(now);
@@ -202,16 +199,40 @@ registerPanel({
         const rows = list.filter((x) => x.day === key).sort(wallOrder);
         if (rows.length) html += `<ol>${rows.map(row).join('')}</ol>`;
       }
-      const out = `<div class="up${s.show.time ? '' : ' no-time'}">${title(ctx)}<div class="up-list as-view"><div class="up-track as-track">${html}</div></div></div>`;
+      const out = `<div class="up${s.show.time ? '' : ' no-time'}">${title(ctx)}<div class="up-list">${html}</div><div class="up-more" hidden></div></div>`;
       if (out === lastHtml) return;
       lastHtml = out;
       ctx.el.innerHTML = out;
       fit();
     };
     let lastHtml = '';
+    let extra = { open: 0, done: 0 };
+    // Hide what doesn't fit (finished tasks are last in each day, so they go first) and count it.
     const fit = () => {
       const view = ctx.el.querySelector('.up-list');
-      if (view && s.scroll !== 'off') autoScroll(view, { speed: SPEEDS[s.scroll] || SPEEDS.slow });
+      const more = ctx.el.querySelector('.up-more');
+      if (!view) return;
+      const flat = [];
+      for (const c of view.children) { c.hidden = false; if (c.tagName === 'OL') flat.push(...c.children); else flat.push(c); }
+      for (const e of flat) e.hidden = false;
+      more.hidden = true;
+      const over = flat.length && flat.at(-1).getBoundingClientRect().bottom > view.getBoundingClientRect().bottom + 1;
+      let open = extra.open, done = extra.done;
+      if (over || open || done) { more.hidden = false; more.textContent = moreText(88, 8); }
+      if (over) {
+        const limit = view.getBoundingClientRect().bottom + 1;
+        const cut = Math.max(0, flat.findIndex((e) => e.getBoundingClientRect().bottom > limit));
+        for (const e of flat.slice(cut)) {
+          e.hidden = true;
+          if (e.matches('ol > li')) e.classList.contains('done') ? done++ : open++;
+        }
+        for (const ol of view.querySelectorAll('ol')) if (![...ol.children].some((li) => !li.hidden)) ol.hidden = true;
+        // A day heading with nothing left under it goes too.
+        const shown = [...view.children].filter((c) => !c.hidden);
+        if (shown.at(-1)?.classList.contains('up-day')) shown.at(-1).hidden = true;
+      }
+      if (open || done) more.textContent = moreText(open, done);
+      else more.hidden = true;
     };
     ctx.every(60000, draw, { align: true });
     let size = '';
@@ -221,14 +242,14 @@ registerPanel({
     }) : null;
     ro?.observe(ctx.el);
     document.fonts?.ready.then(fit);
-    return { destroy() { ro?.disconnect(); ctx.el.querySelectorAll('.as-view').forEach(stopScroll); } };
+    return { destroy() { ro?.disconnect(); } };
   },
 
   css: `
     .up { height: 100%; display: flex; flex-direction: column; gap: 3cqh; }
-    .up-list { flex: 1; min-height: 0; overflow: hidden; mask-image: linear-gradient(to bottom, #000 85%, transparent); }
-    .up-track { display: flex; flex-direction: column; gap: 1.2cqh; will-change: transform; }
-    .as-view.as-on { mask-image: linear-gradient(to bottom, transparent, #000 6%, #000 90%, transparent); }
+    .up-list { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 1.2cqh; }
+    .up [hidden] { display: none !important; }
+    .up-more { flex: none; font-size: min(4.2cqh, 3.2cqw); color: var(--text-faint); }
     .up-day { font-size: min(4.6cqh, 3.4cqw); color: var(--accent); font-weight: 600; margin-top: 1.4cqh; }
     .up-day:first-child { margin-top: 0; }
     .up-notes, .upc-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3em; flex: none; }
@@ -272,9 +293,7 @@ registerPanel({
     .upc-date { font-size: calc(var(--fs) * .78); color: var(--text-faint); }
     .upc-col.today .upc-label { color: var(--accent); }
     .upc-col.weekend .upc-date { color: var(--text-dim); }
-    .upc-body { flex: 1; min-height: 0; overflow: hidden; }
-    .upc-track { display: flex; flex-direction: column; gap: calc(var(--fs) * .8); }
-    .upc-track > ol + ol, .upc-track > [data-as-clone] + [data-as-clone] { margin-top: 0; }
+    .upc-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: calc(var(--fs) * .8); }
     .upc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: calc(var(--fs) * .75); }
     .upc li { display: flex; flex-direction: column; gap: .15em; padding-left: .7em;
       border-left: 2px solid hsl(var(--h) 45% 62% / .75); font-size: var(--fs); line-height: 1.25; }
