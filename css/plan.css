@@ -28,6 +28,30 @@ kbd {
   border: 1px solid var(--ui-border-strong); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; margin: 0 1px;
 }
 
+/* ---------- class views ---------- */
+.class-bar {
+  flex: none; display: flex; align-items: center; gap: 6px; padding: 5px 20px; overflow-x: auto; scrollbar-width: none;
+  border-bottom: 1px solid var(--ui-border); background: var(--ui-bg);
+}
+.class-bar[hidden] { display: none; }
+.class-bar::-webkit-scrollbar { display: none; }
+.class-label { font-size: 12px; font-weight: 600; color: var(--text-faint); text-transform: uppercase; letter-spacing: .08em; margin-right: 4px; flex: none; }
+.class-pill {
+  flex: none; display: inline-flex; align-items: center; gap: 7px; padding: 3px 11px; border-radius: 99px; cursor: pointer;
+  font: 600 13px var(--font-ui); color: var(--text-dim); background: transparent; border: 1px solid var(--ui-border-strong);
+}
+.class-pill i { width: 8px; height: 8px; border-radius: 50%; background: hsl(var(--h) 60% 62%); }
+.class-pill b { font-weight: 600; font-size: 11.5px; color: var(--text-faint); background: var(--ui-raised); border-radius: 99px; padding: 0 6px; line-height: 17px; }
+.class-pill:hover { color: var(--text); border-color: var(--ui-accent); }
+.class-pill[aria-selected="true"] { color: var(--ui-accent-ink); background: var(--ui-accent); border-color: var(--ui-accent); }
+.class-pill.has-h[aria-selected="true"] { color: hsl(var(--h) 40% 12%); background: hsl(var(--h) 60% 70%); border-color: hsl(var(--h) 60% 70%); }
+.class-pill[aria-selected="true"] i { background: currentColor; }
+.class-pill[aria-selected="true"] b { color: inherit; background: rgba(0, 0, 0, .14); }
+.class-hint { font-size: 12px; color: var(--text-faint); margin-left: 8px; white-space: nowrap; flex: none; }
+/* A thin line in the class's color under the bar, so you can tell at a glance you're in a class view. */
+.plan.class-view .class-bar { box-shadow: inset 0 -2px 0 hsl(var(--class-h, 225) 60% 65% / .7); }
+.cat-chip.current { box-shadow: 0 0 0 2px hsl(var(--h) 60% 65% / .8); }
+
 /* ---------- body ---------- */
 .plan-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 340px; }
 .plan-main { overflow: auto; min-height: 0; }

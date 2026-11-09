@@ -13,7 +13,8 @@ import { enableMarquee, paintSelection, clearSelection, toggleSelected, isSelect
 import { openMenu, closeMenu } from './menu.js';
 import { closePopover, openPopover } from './popover.js';
 import { editTask, editGoal, editProject, editCategory, editNoteDetails, deleteWithUndo, editDueDates, setDueDates, dueChoices } from './editors.js';
-import { openQuickAdd, setQuickAddHandler, isQuickAddOpen, resolveLine, createParsed, addLines } from './quickadd.js';
+import { openQuickAdd, setQuickAddHandler, isQuickAddOpen, resolveLine, createParsed, addLines, setDefaultCategory } from './quickadd.js';
+import { store } from '../../core/sync.js';
 import { cleanLines } from './editors.js';
 import { actionFor, openShortcuts, shortcutsOpen, hint } from './keys.js';
 import { parseICS } from '../ics.js';
@@ -47,6 +48,20 @@ let showArchived = false;
 let listFilter = { q: '', done: false, past: false };
 
 const ev = () => state.cfg.data.events;
+
+/* ---- class views: the Plan can show just one category's work (Math, ENG111, …) ---- */
+const NOCLASS = '*none*'; // "No class": tasks without a category
+let classView = store.get('dusk.plan.class') || null;
+const sameCat = (a, b) => (a || '').toLowerCase() === (b || '').toLowerCase();
+const inClass = (x) => classView == null || (classView === NOCLASS ? !x.category : sameCat(x.category, classView));
+// Tasks on show in the current class view.
+const tasks = () => (classView == null ? ev() : ev().filter(inClass));
+// Notes on show: the class's notes, plus notes with no category (breaks, school events) in every view.
+const viewNotes = () => {
+  const all = state.cfg.data.notes || [];
+  return classView == null ? all : all.filter((n) => !n.category || inClass(n));
+};
+const classLabel = (c) => (c === NOCLASS ? 'No class' : c);
 const todayKey = () => isoDate(new Date());
 const visible = () => !root.hidden;
 const REPEAT_LABEL = { daily: 'Every day', weekly: 'Every week', monthly: 'Every month', yearly: 'Every year' };
@@ -130,7 +145,7 @@ function noteItem(n, day) {
 
 // One-day notes for a day (multi-day notes are drawn as bars instead).
 function notesBlock(key, { placeholder = 'Note for the day, e.g. Essay due' } = {}) {
-  const notes = notesForDay(state.cfg.data.notes, key).filter((n) => !n.len);
+  const notes = notesForDay(viewNotes(), key).filter((n) => !n.len);
   const adding = inline?.zone === `note:${key}`;
   if (!notes.length && !adding) return '';
   return `<ul class="day-notes">${notes.map((n) => noteItem(n, key)).join('')}${adding ? `<li class="dnote editing"><input data-inline="note:${key}" value="${esc(inline.value || '')}" placeholder="${esc(placeholder)}" aria-label="New note"></li>` : ''}</ul>`;
@@ -202,12 +217,12 @@ function weekName(start) {
 function renderTimeline() {
   const today = todayKey();
   const n = rangeDays();
-  const occ = occurrences(ev(), { from: rangeStart, days: n });
+  const occ = occurrences(tasks(), { from: rangeStart, days: n });
   const byDay = new Map();
   for (const o of occ) (byDay.get(o.day) || byDay.set(o.day, []).get(o.day)).push(o);
   let days = '';
   // Multi-day notes become bars across the columns.
-  const spans = noteOccurrences(state.cfg.data.notes, rangeStart, n).filter((o) => o.len).map((o) => ({
+  const spans = noteOccurrences(viewNotes(), rangeStart, n).filter((o) => o.len).map((o) => ({
     o, s: Math.max(0, indexOf(o.start)), e: Math.min(n - 1, indexOf(o.end)),
     contL: indexOf(o.start) < 0, contR: indexOf(o.end) > n - 1,
   }));
@@ -275,14 +290,14 @@ function miniTask(t, day) {
 function renderMonth() {
   const { first, gridStart, weeks } = monthGrid();
   const today = todayKey();
-  const occ = occurrences(ev(), { from: gridStart, days: weeks * 7 });
+  const occ = occurrences(tasks(), { from: gridStart, days: weeks * 7 });
   const byDay = new Map();
   for (const o of occ) (byDay.get(o.day) || byDay.set(o.day, []).get(o.day)).push(o);
 
   let head = '';
   for (let i = 0; i < 7; i++) head += `<div class="mhead">${addDays(gridStart, i).toLocaleDateString(undefined, { weekday: 'short' })}</div>`;
   // Multi-day notes: one bar per week row they cross.
-  const occs = noteOccurrences(state.cfg.data.notes, gridStart, weeks * 7).filter((o) => o.len);
+  const occs = noteOccurrences(viewNotes(), gridStart, weeks * 7).filter((o) => o.len);
   const mbars = [];
   const depth = new Array(weeks * 7).fill(0);
   for (let w = 0; w < weeks; w++) {
@@ -494,7 +509,7 @@ function renderSide() {
   let html = '';
 
   // Overdue: unfinished one-off tasks from before today that are off the left of the screen.
-  const overdue = ev().filter((t) => t.date && (!t.repeat || t.repeat === 'none') && !t.done && t.date < today && t.date < leftEdge)
+  const overdue = tasks().filter((t) => t.date && (!t.repeat || t.repeat === 'none') && !t.done && t.date < today && t.date < leftEdge)
     .sort((a, b) => a.date.localeCompare(b.date));
   if (overdue.length) {
     html += `<section class="side-block overdue-block">
@@ -519,11 +534,12 @@ function renderSide() {
   </section>`;
 
   // Projects
-  const projects = d.projects.filter((p) => showArchived || !p.archived).sort(byOrder);
+  // In a class view, only projects with work in that class.
+  const projects = d.projects.filter((p) => (showArchived || !p.archived) && (classView == null || ev().some((t) => t.projectId === p.id && inClass(t)))).sort(byOrder);
   const archivedCount = d.projects.filter((p) => p.archived).length;
   html += `<section class="side-block" data-drop data-accept="project" data-zone="projects">
     <header><h2>Projects</h2><button type="button" class="icon-add" data-act="new-project" aria-label="New project">+</button></header>
-    ${projects.map(projectCard).join('') || '<p class="side-hint">Projects collect tasks toward something bigger. Their progress fills in as tasks get done.</p>'}
+    ${projects.map(projectCard).join('') || (classView != null && d.projects.length ? `<p class="side-hint">No projects with ${esc(classLabel(classView))} tasks.</p>` : '<p class="side-hint">Projects collect tasks toward something bigger. Their progress fills in as tasks get done.</p>')}
     ${archivedCount ? `<button type="button" class="link small-link" data-act="toggle-archived">${showArchived ? 'Hide' : 'Show'} archived (${archivedCount})</button>` : ''}
   </section>`;
 
@@ -533,13 +549,13 @@ function renderSide() {
   for (const t of [...ev(), ...(state.cfg.data.notes || [])]) if (t.category) counts.set(t.category, (counts.get(t.category) || 0) + 1);
   const catBlock = `<section class="side-block cats-block">
     <header><h2>Categories</h2></header>
-    ${cats.length ? `<ul class="cat-list">${cats.map((c) => `<li><button type="button" class="cat-chip" data-act="cat-edit" data-cat="${esc(c)}" data-drop data-accept="task note" data-zone="category" style="--h:${catHue(c)}" title="Change color or rename · drop tasks here to tag them">
+    ${cats.length ? `<ul class="cat-list">${cats.map((c) => `<li><button type="button" class="cat-chip${classView !== NOCLASS && classView != null && sameCat(c, classView) ? ' current' : ''}" data-act="cat-edit" data-cat="${esc(c)}" data-drop data-accept="task note" data-zone="category" style="--h:${catHue(c)}" title="Change color or rename · drop tasks here to tag them">
       <i></i><span>${esc(c)}</span><b>${counts.get(c) || 0}</b></button></li>`).join('')}</ul>`
       : '<p class="side-hint">Type #name when adding a task (like #ENG111) to give it a category. Its color shows on the task’s edge, here and on the wall.</p>'}
   </section>`;
 
   // Inbox
-  const inbox = ev().filter((t) => !t.date && !t.projectId).sort(byOrder);
+  const inbox = tasks().filter((t) => !t.date && !t.projectId).sort(byOrder);
   html += `<section class="side-block inbox" data-drop data-accept="task" data-zone="inbox">
     <header><h2>Inbox</h2>${inbox.length ? `<span class="count">${inbox.length}</span>` : ''}</header>
     <ol class="tasks compact">${inbox.map((t) => taskCard(t)).join('')}</ol>
@@ -560,7 +576,7 @@ function projectCard(p) {
   const meta = [prog.manual ? '' : `${prog.done} of ${prog.total} tasks`, due].filter(Boolean).join(' · ');
   let body = '';
   if (open) {
-    const tasks = ev().filter((t) => t.projectId === p.id);
+    const tasks = ev().filter((t) => t.projectId === p.id && inClass(t));
     const unscheduled = tasks.filter((t) => !t.date && !t.done).sort(byOrder);
     const scheduled = tasks.filter((t) => t.date && !t.done).sort((a, b) => a.date.localeCompare(b.date) || (a.time || '').localeCompare(b.time || ''));
     const doneTasks = tasks.filter((t) => t.done);
@@ -583,13 +599,66 @@ function projectCard(p) {
   </div>`;
 }
 
+/* ----------------------------- class views ----------------------------- */
+
+function setClassView(c, { quiet = false } = {}) {
+  classView = c || null;
+  if (classView) store.set('dusk.plan.class', classView); else store.del('dusk.plan.class');
+  setDefaultCategory(classView && classView !== NOCLASS ? classView : '');
+  clearSelection(); // don't leave hidden tasks selected
+  render();
+  if (!quiet) $('planClasses').querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+function cycleClass(step) {
+  const list = [null, ...M.allCategories(), ...(ev().some((t) => !t.category) ? [NOCLASS] : [])];
+  const i = Math.max(0, list.findIndex((c) => (c == null ? classView == null : classView != null && (c === NOCLASS ? classView === NOCLASS : sameCat(c, classView)))));
+  const next = list[(i + step + list.length) % list.length];
+  setClassView(next);
+  toast(next == null ? 'Showing every class' : `Showing ${classLabel(next)}`);
+}
+
+// What's left to do per class: unfinished in the next 7 days, plus overdue.
+function classCounts() {
+  const counts = new Map();
+  const bump = (c) => { const k = c ? c.toLowerCase() : NOCLASS; counts.set(k, (counts.get(k) || 0) + 1); };
+  const today = todayKey();
+  for (const o of occurrences(ev(), { from: startOfDay(new Date()), days: 7 })) if (!o.done) bump(o.category);
+  for (const t of ev()) if (t.date && t.date < today && (!t.repeat || t.repeat === 'none') && !t.done) bump(t.category);
+  return counts;
+}
+
+function renderClassBar() {
+  const bar = $('planClasses');
+  const cats = M.allCategories();
+  const hasNone = ev().some((t) => !t.category);
+  // The class you were viewing was renamed or removed: back to everything.
+  if (classView != null && classView !== NOCLASS && !cats.some((c) => sameCat(c, classView))) { classView = null; store.del('dusk.plan.class'); setDefaultCategory(''); }
+  if (classView === NOCLASS && !hasNone) { classView = null; store.del('dusk.plan.class'); }
+  bar.hidden = !cats.length;
+  root.classList.toggle('class-view', classView != null);
+  root.style.setProperty('--class-h', classView && classView !== NOCLASS ? catHue(classView) : '');
+  if (!cats.length) return;
+  const counts = classCounts();
+  const pill = (value, label, hue, n) => {
+    const on = value == null ? classView == null : value === NOCLASS ? classView === NOCLASS : classView != null && sameCat(value, classView);
+    return `<button type="button" role="tab" class="class-pill${hue != null ? ' has-h' : ''}" aria-selected="${on}" data-class="${value == null ? '' : esc(value)}"${hue != null ? ` style="--h:${hue}"` : ''}
+      title="${value == null ? 'Every class' : `Only ${esc(label)}`}${n ? ` · ${n} to do in the next 7 days or overdue` : ''}">${hue != null ? '<i></i>' : ''}${esc(label)}${n ? `<b>${n}</b>` : ''}</button>`;
+  };
+  bar.innerHTML = `<span class="class-label">Show</span>
+    ${pill(null, 'All classes', null, 0)}
+    ${cats.map((c) => pill(c, c, catHue(c), counts.get(c.toLowerCase()) || 0)).join('')}
+    ${hasNone ? pill(NOCLASS, 'No class', null, counts.get(NOCLASS) || 0) : ''}
+    ${classView != null && classView !== NOCLASS ? `<span class="class-hint">New tasks and notes go in ${esc(classView)}</span>` : ''}`;
+}
+
 function renderBar() {
   const fmt = (d, opts) => d.toLocaleDateString(undefined, opts);
   root.querySelectorAll('.view-toggle button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
   $('weekPrev').hidden = $('weekNext').hidden = view === 'list';
   $('weekPrev').title = view === 'month' ? 'Previous month (←)' : 'Back 7 days (Shift+←)';
   $('weekNext').title = view === 'month' ? 'Next month (→)' : 'Forward 7 days (Shift+→)';
-  if (view === 'list') { $('weekLabel').textContent = 'Everything'; $('weekRel').textContent = ''; $('weekSummary').textContent = `${ev().length} items`; $('weekThis').hidden = true; return; }
+  if (view === 'list') { $('weekLabel').textContent = 'Everything'; $('weekRel').textContent = ''; $('weekSummary').textContent = `${tasks().length} items`; $('weekThis').hidden = true; return; }
 
   if (view === 'month') {
     const { first, gridStart, weeks } = monthGrid();
@@ -598,7 +667,7 @@ function renderBar() {
     const diff = (first.getFullYear() - now.getFullYear()) * 12 + first.getMonth() - now.getMonth();
     $('weekThis').hidden = diff === 0;
     $('weekRel').textContent = diff === 0 ? 'This month' : diff === 1 ? 'Next month' : diff === -1 ? 'Last month' : diff > 0 ? `${diff} months ahead` : `${-diff} months back`;
-    const occ = occurrences(ev(), { from: gridStart, days: weeks * 7 }).filter((o) => parseLocal(o.day).getMonth() === first.getMonth());
+    const occ = occurrences(tasks(), { from: gridStart, days: weeks * 7 }).filter((o) => parseLocal(o.day).getMonth() === first.getMonth());
     $('weekSummary').textContent = occ.length ? `${occ.filter((o) => o.done).length} of ${occ.length} tasks done` : '';
     return;
   }
@@ -617,7 +686,7 @@ function renderBar() {
     const unit = n >= 14 ? `${Math.round(n / 7)} weeks` : `${n} day${n === 1 ? '' : 's'}`;
     $('weekRel').textContent = off > 0 ? `${unit} ahead` : `${unit} back`;
   }
-  const occ = occurrences(ev(), { from: a, days: last - first + 1 });
+  const occ = occurrences(tasks(), { from: a, days: last - first + 1 });
   $('weekSummary').textContent = occ.length ? `${occ.filter((o) => o.done).length} of ${occ.length} tasks done` : '';
 }
 
@@ -626,7 +695,7 @@ function renderBar() {
 function renderList() {
   const q = listFilter.q.toLowerCase();
   const today = todayKey();
-  const rows = ev().filter((t) => {
+  const rows = tasks().filter((t) => {
     if (q && !`${t.title} ${t.category || ''} ${M.findProject(t.projectId)?.title || ''}`.toLowerCase().includes(q)) return false;
     const repeating = t.repeat && t.repeat !== 'none';
     if (!listFilter.done && !repeating && t.done) return false;
@@ -680,6 +749,7 @@ export function render({ timeline = true } = {}) {
   if (timeline) { if (view === 'days') renderTimeline(); else if (view === 'month') renderMonth(); else renderList(); }
   renderSide();
   renderBar();
+  renderClassBar();
 
   // Only touch scroll positions that changed: setting them cancels a smooth scroll in progress.
   if (scrollEl.scrollTop !== scroll[0]) scrollEl.scrollTop = scroll[0];
@@ -1045,7 +1115,7 @@ function submitInline(input, pasted = null) {
     if (!lines.length) { inline = null; render(); return; }
     const day = zone.slice(5);
     let last = null;
-    M.batch(() => { for (const l of lines) last = M.addNote({ date: day, text: l }); });
+    M.batch(() => { for (const l of lines) last = M.addNote({ date: day, text: l, category: classView && classView !== NOCLASS ? classView : '' }); });
     flash = last?.id || null;
     inline = { zone, value: '', focus: true };
     render();
@@ -1212,7 +1282,7 @@ function projectMenu(e, id) {
 }
 
 function dayMenu(e, key) {
-  const occ = occurrences(ev(), { from: parseLocal(key), days: 1 });
+  const occ = occurrences(tasks(), { from: parseLocal(key), days: 1 });
   const open = occ.filter((o) => !o.done);
   openMenu(e, [
     { heading: dayLabel(parseLocal(key)) },
@@ -1246,7 +1316,10 @@ function onClick(e) {
     return;
   }
   if (a === 'open-day') { openDay(act.dataset.day); return; }
-  if (a === 'cat-edit') { editCategory(act, act.dataset.cat, catHue, { onSelect: (c) => openSelectFilter($('planSelect'), { cats: [c] }) }); return; }
+  if (a === 'cat-edit') { editCategory(act, act.dataset.cat, catHue, {
+    onSelect: (c) => openSelectFilter($('planSelect'), { cats: [c] }),
+    onRename: (from, to) => { if (classView && classView !== NOCLASS && sameCat(from, classView)) { classView = to; store.set('dusk.plan.class', to); setDefaultCategory(to); } },
+  }); return; }
   if (a === 'sel-clear') { clearSelection(); return; }
   if (a === 'sel-menu') { const r = act.getBoundingClientRect(); selectionMenu({ preventDefault() {}, target: act, clientX: r.left, clientY: r.bottom + 6, detail: e.detail }); return; }
   if (a === 'sel-done') { bulkDone(); return; }
@@ -1502,6 +1575,8 @@ function runAction(id) {
     case 'viewList': setView('list'); return true;
     case 'selectAll': if (view === 'list') return false; selectVisible(); return true;
     case 'selectBy': openSelectFilter(); return true;
+    case 'nextClass': cycleClass(1); return true;
+    case 'prevClass': cycleClass(-1); return true;
     case 'shortcuts': openShortcuts(); return true;
   }
   if (!multi && !it) return false;
@@ -1753,6 +1828,11 @@ export function initPlan() {
   }, true);
   $('planKeys').addEventListener('click', openShortcuts);
   $('planSelect').addEventListener('click', () => openSelectFilter());
+  $('planClasses').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-class]');
+    if (b) setClassView(b.dataset.class || null);
+  });
+  setDefaultCategory(classView && classView !== NOCLASS ? classView : '');
   $('planSelectOff').addEventListener('click', () => { applySelectFilter(null); toast('Selection filter off'); });
 
   // Hovering (or focusing) a task with a due date lights up that day and says how far away it is.

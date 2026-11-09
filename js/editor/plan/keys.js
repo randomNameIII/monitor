@@ -23,6 +23,8 @@ export const ACTIONS = [
   { id: 'viewDays', group: 'Moving around', label: 'Days view', keys: [] },
   { id: 'viewMonth', group: 'Moving around', label: 'Month view', keys: ['M'] },
   { id: 'viewList', group: 'Moving around', label: 'List view', keys: [] },
+  { id: 'nextClass', group: 'Moving around', label: 'Next class (All → Math → English…)', keys: ['C'] },
+  { id: 'prevClass', group: 'Moving around', label: 'Previous class', keys: ['Shift+C'] },
 
   { id: 'done', group: 'The selected or focused item', label: 'Mark done / not done', keys: ['Space', 'X'] },
   { id: 'edit', group: 'The selected or focused item', label: 'Edit', keys: ['Enter'] },

@@ -29,6 +29,11 @@ export function setQuickAddHandler(fn) { onAdded = fn; }
 
 const weekStart = () => state.cfg.board.weekStart || 'monday';
 
+// While the Plan shows one class (say Math), new tasks and notes get that category unless you type another.
+let defaultCategory = '';
+export function setDefaultCategory(c) { defaultCategory = c || ''; }
+export const getDefaultCategory = () => defaultCategory;
+
 /**
  * Parse one line in a context. ctx: { kind, day?, week?, projectId? }
  * A day in the context is used when the text doesn't name one.
@@ -37,6 +42,7 @@ export function resolveLine(text, ctx = {}) {
   const k = ctx.kind || 'task';
   const p = parseQuick(text, { projects: state.cfg.data.projects.filter((x) => !x.archived), kind: k });
   const ctxDay = ctx.day ? parseLocal(ctx.day) : null;
+  if (!p.category && defaultCategory && (k === 'task' || k === 'note')) p.category = defaultCategory;
   if (ctx.due && (k === 'task' || k === 'project')) {
     p.due = parseLocal(ctx.due);
     p.dueKey = ctx.due;

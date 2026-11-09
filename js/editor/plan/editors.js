@@ -289,7 +289,7 @@ export function editNoteDetails(anchor, id, { focusEnd = false, day = null } = {
 
 const CAT_HUES = [0, 20, 38, 55, 90, 140, 170, 195, 215, 240, 270, 300, 330];
 
-export function editCategory(anchor, name, hueOf, { onSelect } = {}) {
+export function editCategory(anchor, name, hueOf, { onSelect, onRename } = {}) {
   let current = name;
   openPopover(anchor, (el) => {
     const count = [...state.cfg.data.events, ...(state.cfg.data.notes || [])].filter((e) => (e.category || '').toLowerCase() === name.toLowerCase()).length;
@@ -327,6 +327,7 @@ export function editCategory(anchor, name, hueOf, { onSelect } = {}) {
     const rename = () => {
       const v = q('name').value.trim();
       if (!v || v === current) return;
+      onRename?.(current, v);
       M.renameCategory(current, v);
       current = v;
     };
