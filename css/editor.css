@@ -297,3 +297,14 @@ main { flex: 1; min-height: 0; display: flex; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* Sync → Test the connection */
+.conn-steps { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.conn-steps li { display: flex; flex-direction: column; gap: 3px; padding-left: 28px; position: relative; font-size: 14px; }
+.conn-steps li::before { position: absolute; left: 0; top: 0; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+  font: 700 12px/20px var(--font-ui); text-align: center; }
+.conn-steps li.ok::before { content: "✓"; background: rgba(120, 220, 160, .18); color: var(--ok, #7fdca0); }
+.conn-steps li.bad::before { content: "✕"; background: rgba(255, 120, 120, .16); color: #ff9a9a; }
+.conn-steps li.run::before { content: "…"; background: var(--ui-raised); color: var(--text-dim); }
+.conn-steps li span { color: var(--text-dim); line-height: 1.5; }
+.conn-steps li.bad span { color: var(--text); }

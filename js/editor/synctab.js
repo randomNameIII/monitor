@@ -26,6 +26,54 @@ export function readConnectLink() {
 }
 let showConnect = false;
 
+// Step-by-step connection check, to tell a blocked network from a bad token or gist ID.
+async function testConnection() {
+  const list = document.getElementById('connSteps');
+  const btn = document.getElementById('testConn');
+  const steps = [];
+  const draw = () => {
+    list.hidden = false;
+    list.innerHTML = steps.map((s) => `<li class="${s.state}"><b>${esc(s.title)}</b>${s.detail ? `<span>${s.detail}</span>` : ''}</li>`).join('');
+  };
+  const step = (title) => { const s = { title, state: 'run', detail: 'Checking…' }; steps.push(s); draw(); return s; };
+  const done = (s, ok, detail = '') => { s.state = ok ? 'ok' : 'bad'; s.detail = detail; draw(); return ok; };
+  btn.disabled = true;
+  try {
+    // 1. Any answer at all from GitHub (a plain request, no token).
+    let s = step('This browser can reach GitHub');
+    let reached = false;
+    try { const r = await fetch(`https://api.github.com/zen?t=${Date.now()}`); reached = true; done(s, true, r.ok ? '' : `GitHub answered (${r.status}).`); }
+    catch {
+      done(s, false, 'No answer from <code>api.github.com</code>. Something on this computer or network is blocking it; school and work networks '
+        + 'and their web filters often do. Open <a href="https://api.github.com" target="_blank" rel="noopener">api.github.com</a> in a new tab: '
+        + 'if you don’t see a page of text starting with <code>{"current_user_url"</code>, it’s blocked here. This computer can still edit '
+        + 'on another network (home Wi-Fi or a phone hotspot).');
+    }
+    if (!reached) return;
+    // 2. A signed-in request (this is the kind the editor makes).
+    if (!prefs.token) { done(step('Token'), false, 'No token saved in this browser yet. Paste the same token you use on your other computer (step 1 above), or use a “connect another computer” link.'); return; }
+    s = step('The token works');
+    try {
+      const r = await fetch(`https://api.github.com/user?t=${Date.now()}`, { headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${prefs.token}` } });
+      if (r.status === 401) return done(s, false, 'GitHub doesn’t accept this token: it may be mistyped, expired or revoked. Make a new one with the <b>gist</b> scope and paste it in step 1 (and on your other computers).');
+      const scopes = r.headers.get('x-oauth-scopes');
+      if (scopes != null && !scopes.split(',').map((x) => x.trim()).includes('gist')) return done(s, false, `The token works but doesn’t have the <b>gist</b> scope (it has: ${esc(scopes || 'none')}). Make a classic token with the gist scope.`);
+      done(s, true, r.ok ? '' : `GitHub answered (${r.status}).`);
+    } catch {
+      return done(s, false, 'GitHub answers plain requests but this browser blocks requests that carry a token. That’s usually a privacy or security '
+        + 'extension, or a filter that only lets simple requests through. Try a private window, turn off extensions for this site, or try another browser.');
+    }
+    // 3. The gist itself.
+    const id = prefs.gist || (document.getElementById('gistInput')?.value || '').trim().replace(/^.*gist\.github\.com\/(?:[^/]+\/)?/, '').replace(/[/#?].*$/, '');
+    if (!id) { done(step('Gist'), false, 'Paste your gist ID in step 2 above, then test again.'); return; }
+    s = step('Your board’s gist can be read');
+    try {
+      const cfg = await fetchGist(id, prefs.token);
+      done(s, true, `Found it: ${cfg.data?.events?.length || 0} tasks, ${cfg.panels?.length || 0} panels.`);
+    } catch (e) { done(s, false, esc(e.message)); }
+  } finally { btn.disabled = false; }
+}
+
 function render() {
   const hasToken = !!prefs.token;
   const hasGist = !!prefs.gist;
@@ -70,6 +118,13 @@ function render() {
       </ol>
       <label class="toggle inline"><input type="checkbox" id="autoPub" ${prefs.autopublish ? 'checked' : ''}><span class="switch" aria-hidden="true"></span>
         <span>Publish automatically a few seconds after each change</span></label>
+    </section>
+
+    <section class="card form-section" id="syncCheck">
+      <h2>Trouble connecting?</h2>
+      <p>Checks, step by step, whether this browser can reach GitHub, whether the token works, and whether it can read your board.</p>
+      <div class="row"><button class="btn" id="testConn">Test the connection</button></div>
+      <ol class="conn-steps" id="connSteps" hidden></ol>
     </section>
 
     <section class="card form-section" id="otherComputers">
@@ -136,6 +191,7 @@ function render() {
       toast('Loaded the board from the gist');
     } catch (err) { toast(err.message, true); }
   });
+  on('testConn', 'click', () => testConnection());
   on('forgetGist', 'click', () => { prefs.gist = ''; render(); toast('Disconnected. The gist itself is untouched.'); });
 
   on('makeConnect', 'click', () => { showConnect = true; render(); document.getElementById('connectLink')?.select(); });

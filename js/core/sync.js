@@ -43,15 +43,26 @@ export function loadLocal() {
   return text ? parse(text) : null;
 }
 
+export const NETWORK_MSG = 'Couldn’t reach GitHub from this browser. Something on this computer or its network is blocking api.github.com '
+  + '(school and work networks often do). “Test the connection” in the Sync tab shows where it stops.';
+
 async function gh(path, token, init = {}) {
-  const res = await fetch(`https://api.github.com${path}`, {
-    ...init,
-    headers: {
-      Accept: 'application/vnd.github+json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-    },
-  });
+  let res;
+  try {
+    res = await fetch(`https://api.github.com${path}`, {
+      ...init,
+      headers: {
+        Accept: 'application/vnd.github+json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      },
+    });
+  } catch {
+    // fetch only throws when no answer came back at all: offline, blocked, or refused by the browser.
+    const err = new Error(NETWORK_MSG);
+    err.network = true;
+    throw err;
+  }
   if (!res.ok) {
     let msg = `GitHub returned ${res.status}`;
     try { const j = await res.json(); if (j.message) msg += `: ${j.message}`; } catch { /* no body */ }
@@ -78,7 +89,12 @@ export async function publishGist(token, gistId, cfg) {
 }
 
 export async function fetchGist(gistId, token) {
-  const j = await gh(`/gists/${gistId}`, token, { cache: 'no-cache' });
+  // Signed-in reads skip the browser cache with a throwaway query parameter rather than a cache mode:
+  // some browsers (Firefox) are stricter about cache options on cross-site requests that carry a token.
+  // The display reads without a token, where revalidating (304s don't count against GitHub's limit) is worth keeping.
+  const j = token
+    ? await gh(`/gists/${encodeURIComponent(gistId)}?t=${Date.now()}`, token)
+    : await gh(`/gists/${encodeURIComponent(gistId)}`, '', { cache: 'no-cache' });
   const file = j.files?.[GIST_FILE] || Object.values(j.files || {})[0];
   if (!file) throw new Error('That gist has no files.');
   let text = file.content;
